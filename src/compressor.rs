@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use crate::coder::{ArithmeticEncoder};
+use crate::coder::ArithmeticEncoder;
 use crate::{model::Model, utils::prob_squash};
 use anyhow::{Context, Result};
 
@@ -67,12 +67,12 @@ impl<W: Write> Encoder<W> {
 mod tests {
     use std::{fs::File, io::Read};
 
-    use crate::compressor::Encoder;
-    use anyhow::Result;
     use crate::coder::tests::ArithmeticDecoder;
+    use crate::compressor::Encoder;
     use crate::model::Model;
     use crate::utils::prob_squash;
-    
+    use anyhow::Result;
+
     use crate::model_finder::ModelFinder;
 
     #[cfg(test)]

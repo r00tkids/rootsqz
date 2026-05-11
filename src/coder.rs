@@ -69,9 +69,9 @@ impl<W: Write> ArithmeticEncoder<W> {
 #[cfg(test)]
 pub mod tests {
 
+    use super::ArithmeticEncoder;
     use anyhow::Result;
     use std::io::{BufReader, Read};
-    use super::ArithmeticEncoder;
 
     pub struct ArithmeticDecoder<R: Read> {
         low: u32,
