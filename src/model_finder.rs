@@ -5,11 +5,13 @@ use crate::{
     model::{HashTable, Model, NOrderByteData},
 };
 
+#[allow(dead_code)]
 pub struct ModelFinder {
     pub default_model: Box<dyn Model>,
 }
 
 impl ModelFinder {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         let model = Box::new(create_default_model_config());
 

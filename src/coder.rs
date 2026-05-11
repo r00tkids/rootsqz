@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::{
-    io::{BufReader, BufWriter, Read, Write},
+    io::{BufWriter, Write},
     u32,
 };
 
@@ -64,79 +64,76 @@ impl<W: Write> ArithmeticEncoder<W> {
         self.output.write(&[(self.high >> 24) as u8])?;
         Ok(())
     }
-
-    pub fn len(&self) -> usize {
-        self.bytes_written
-    }
-}
-
-#[allow(dead_code)]
-pub struct ArithmeticDecoder<R: Read> {
-    low: u32,
-    high: u32,
-    state: u32,
-    input: BufReader<R>,
-}
-
-impl<R: Read> ArithmeticDecoder<R> {
-    pub fn new(stream: R) -> Result<Self> {
-        let mut input = BufReader::new(stream);
-
-        let mut state: u32 = 0;
-        let mut buf = [0u8; 1];
-        for _ in 0..4 {
-            if input.read(&mut buf)? == 0 {
-                buf[0] = 0;
-            }
-            state = (state << 8) | buf[0] as u32;
-        }
-
-        Ok(Self {
-            low: 0,
-            input: input,
-            state: state,
-            high: u32::MAX,
-        })
-    }
-
-    pub fn decode(&mut self, p: f64) -> Result<u8> {
-        assert!(p >= 0.);
-        assert!(self.high > self.low);
-
-        let range = (self.high - self.low) as f64;
-        let mut mid = f64::mul_add(range, p, self.low as f64) as u32;
-
-        if mid >= self.high {
-            mid = self.high - 1;
-        }
-
-        assert!(self.high > mid && mid >= self.low);
-        let mut bit = 0;
-        if self.state <= mid {
-            bit = 1;
-            self.high = mid;
-        } else {
-            self.low = mid + 1;
-        }
-
-        while (self.high ^ self.low) < (1 << 24) {
-            self.low <<= 8;
-            self.high = self.high << 8 | 255;
-            let mut c = [0u8];
-            if self.input.read(&mut c)? == 0 {
-                c[0] = 0;
-            }
-            self.state = self.state << 8 | c[0] as u32;
-        }
-
-        Ok(bit)
-    }
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
 
-    use super::{ArithmeticDecoder, ArithmeticEncoder};
+    use anyhow::Result;
+    use std::io::{BufReader, Read};
+    use super::ArithmeticEncoder;
+
+    pub struct ArithmeticDecoder<R: Read> {
+        low: u32,
+        high: u32,
+        state: u32,
+        input: BufReader<R>,
+    }
+
+    impl<R: Read> ArithmeticDecoder<R> {
+        pub fn new(stream: R) -> Result<Self> {
+            let mut input = BufReader::new(stream);
+
+            let mut state: u32 = 0;
+            let mut buf = [0u8; 1];
+            for _ in 0..4 {
+                if input.read(&mut buf)? == 0 {
+                    buf[0] = 0;
+                }
+                state = (state << 8) | buf[0] as u32;
+            }
+
+            Ok(Self {
+                low: 0,
+                input: input,
+                state: state,
+                high: u32::MAX,
+            })
+        }
+
+        pub fn decode(&mut self, p: f64) -> Result<u8> {
+            assert!(p >= 0.);
+            assert!(self.high > self.low);
+
+            let range = (self.high - self.low) as f64;
+            let mut mid = f64::mul_add(range, p, self.low as f64) as u32;
+
+            if mid >= self.high {
+                mid = self.high - 1;
+            }
+
+            assert!(self.high > mid && mid >= self.low);
+            let mut bit = 0;
+            if self.state <= mid {
+                bit = 1;
+                self.high = mid;
+            } else {
+                self.low = mid + 1;
+            }
+
+            while (self.high ^ self.low) < (1 << 24) {
+                self.low <<= 8;
+                self.high = self.high << 8 | 255;
+                let mut c = [0u8];
+                if self.input.read(&mut c)? == 0 {
+                    c[0] = 0;
+                }
+                self.state = self.state << 8 | c[0] as u32;
+            }
+
+            Ok(bit)
+        }
+    }
 
     #[test]
     pub fn round_trip() {

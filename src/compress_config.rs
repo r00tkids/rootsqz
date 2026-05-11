@@ -7,6 +7,7 @@ use crate::model::{
     AdaptiveProbabilityMap, HashTable, LnMixerPred, Model, NOrderByte, NOrderByteData,
 };
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressConfig {
     pub model: ModelConfig,

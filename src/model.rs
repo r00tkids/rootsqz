@@ -67,6 +67,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.table.len()
     }
@@ -77,24 +78,6 @@ where
 
     pub fn get_mut<'a>(&'a mut self, key: u32) -> &'a mut Record {
         &mut self.table[key as usize & self.hash_mask]
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct NOrderByteDataRec([NOrderByteData; 255]);
-impl Default for NOrderByteDataRec {
-    fn default() -> Self {
-        Self([NOrderByteData::default(); 255])
-    }
-}
-
-impl NOrderByteDataRec {
-    fn get(&self, bit_ctx: u32) -> &NOrderByteData {
-        &self.0[bit_ctx as usize - 1]
-    }
-
-    fn get_mut(&mut self, bit_ctx: u32) -> &mut NOrderByteData {
-        &mut self.0[bit_ctx as usize - 1]
     }
 }
 

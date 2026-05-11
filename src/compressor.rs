@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use crate::coder::{ArithmeticDecoder, ArithmeticEncoder};
+use crate::coder::{ArithmeticEncoder};
 use crate::{model::Model, utils::prob_squash};
 use anyhow::{Context, Result};
 
@@ -48,48 +48,7 @@ impl<W: Write> Encoder<W> {
     }
 
     /// Warms up the model by reading a byte stream and learning from it.
-    pub fn warm_up(&mut self, mut byte_stream: impl Read) -> Result<()> {
-        let mut bytes = Vec::<u8>::new();
-        byte_stream.read_to_end(&mut bytes)?;
-        for b in bytes {
-            for i in 0..8 {
-                let bit = (b >> (7 - i)) & 1;
-                self.model.learn(bit);
-            }
-        }
-
-        Ok(())
-    }
-}
-
-#[allow(dead_code)]
-pub struct Decoder<R: Read> {
-    coder: ArithmeticDecoder<R>,
-    model: Box<dyn Model>,
-}
-
-impl<R: Read> Decoder<R> {
-    pub fn new(model: Box<dyn Model>, read_stream: R) -> Result<Self> {
-        Ok(Self {
-            coder: ArithmeticDecoder::new(read_stream)?,
-            model: model,
-        })
-    }
-
-    pub fn decode(&mut self, size: usize) -> Result<Vec<u8>> {
-        let mut res: Vec<u8> = vec![0; size];
-        for byte_idx in 0..size {
-            for _ in 0..8 {
-                let prob = prob_squash(self.model.pred());
-                let bit = self.coder.decode(prob)?;
-                self.model.learn(bit);
-                res[byte_idx] = (res[byte_idx] << 1) | bit;
-            }
-        }
-
-        Ok(res)
-    }
-
+    #[allow(dead_code)]
     pub fn warm_up(&mut self, mut byte_stream: impl Read) -> Result<()> {
         let mut bytes = Vec::<u8>::new();
         byte_stream.read_to_end(&mut bytes)?;
@@ -106,13 +65,58 @@ impl<R: Read> Decoder<R> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
     use std::{fs::File, io::Read};
 
-    use crate::compressor::{Decoder, Encoder};
-    use crate::model::{HashTable, NOrderByteData};
-    use crate::model_finder::{create_default_model_config, ModelFinder};
+    use crate::compressor::Encoder;
+    use anyhow::Result;
+    use crate::coder::tests::ArithmeticDecoder;
+    use crate::model::Model;
+    use crate::utils::prob_squash;
+    
+    use crate::model_finder::ModelFinder;
+
+    #[cfg(test)]
+    pub struct Decoder<R: Read> {
+        coder: ArithmeticDecoder<R>,
+        model: Box<dyn Model>,
+    }
+
+    #[cfg(test)]
+    impl<R: Read> Decoder<R> {
+        pub fn new(model: Box<dyn Model>, read_stream: R) -> Result<Self> {
+            Ok(Self {
+                coder: ArithmeticDecoder::new(read_stream)?,
+                model: model,
+            })
+        }
+
+        pub fn decode(&mut self, size: usize) -> Result<Vec<u8>> {
+            let mut res: Vec<u8> = vec![0; size];
+            for byte_idx in 0..size {
+                for _ in 0..8 {
+                    let prob = prob_squash(self.model.pred());
+                    let bit = self.coder.decode(prob)?;
+                    self.model.learn(bit);
+                    res[byte_idx] = (res[byte_idx] << 1) | bit;
+                }
+            }
+
+            Ok(res)
+        }
+
+        pub fn warm_up(&mut self, mut byte_stream: impl Read) -> Result<()> {
+            let mut bytes = Vec::<u8>::new();
+            byte_stream.read_to_end(&mut bytes)?;
+            for b in bytes {
+                for i in 0..8 {
+                    let bit = (b >> (7 - i)) & 1;
+                    self.model.learn(bit);
+                }
+            }
+
+            Ok(())
+        }
+    }
 
     #[test]
     pub fn round_trip() {
