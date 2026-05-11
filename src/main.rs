@@ -195,9 +195,9 @@ mod node_tests {
     #[test]
     pub fn round_trip() {
         let model_config = serde_json::de::from_reader::<_, CompressConfig>(
-            File::open("compress.json").expect("Failed to open compress.json"),
+            File::open("tests/compress.json").expect("Failed to open tests/compress.json"),
         )
-        .expect("Failed to parse compress.json");
+        .expect("Failed to parse tests/compress.json");
 
         let hash_table = HashTable::<NOrderByteData>::new(26);
         let model = model_config
@@ -255,9 +255,9 @@ mod node_tests {
     #[test]
     pub fn web() {
         let model_config = serde_json::de::from_reader::<_, CompressConfig>(
-            File::open("compress.json").expect("Failed to open compress.json"),
+            File::open("tests/compress.json").expect("Failed to open tests/compress.json"),
         )
-        .expect("Failed to parse compress.json");
+        .expect("Failed to parse tests/compress.json");
 
         let hash_table = HashTable::<NOrderByteData>::new(26);
         let model = model_config
