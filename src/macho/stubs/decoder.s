@@ -138,7 +138,6 @@ _arithmetic_decode_bit:
 .globl _arithmetic_decode_stream
 _arithmetic_decode_stream:
     stp     x29, x30, [sp, #-64]!
-    mov     x29, sp
     stp     x19, x20, [sp, #16]
     stp     x21, x22, [sp, #32]
     stp     x23, x24, [sp, #48]

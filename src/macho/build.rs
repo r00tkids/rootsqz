@@ -20,7 +20,7 @@ const MODEL_SUPPORT_S: &str = include_str!("stubs/model_support.s");
 const NORDER_BYTE_S: &str = include_str!("stubs/norder_byte.s");
 const WORD_S: &str = include_str!("stubs/word.s");
 const LN_MIXER_S: &str = include_str!("stubs/ln_mixer.s");
-const TINY_RUNTIME_C: &str = include_str!("stubs/tiny_runtime.c");
+const TINY_RUNTIME_S: &str = include_str!("stubs/tiny_runtime.s");
 const DIAGNOSTIC_RUNTIME_C: &str = include_str!("stubs/diagnostic_runtime.c");
 
 pub fn build_decompressor(
@@ -57,8 +57,12 @@ pub fn build_decompressor(
             "model.s",
             render_model_assembly(model_config, DEFAULT_NORDER_TABLE_POW2)?,
         ),
-        ("runtime.c", render_runtime_c(diagnostics)),
     ];
+    if diagnostics {
+        sources.push(("runtime.c", DIAGNOSTIC_RUNTIME_C.to_owned()));
+    } else {
+        sources.push(("runtime.s", TINY_RUNTIME_S.to_owned()));
+    }
 
     let model_features = ModelFeatures::from_config(model_config);
     if model_features.norder_byte {
@@ -146,21 +150,6 @@ impl ModelFeatures {
     }
 }
 
-fn render_runtime_c(diagnostics: bool) -> String {
-    if diagnostics {
-        render_diagnostic_runtime_c()
-    } else {
-        render_tiny_runtime_c()
-    }
-}
-
-fn render_tiny_runtime_c() -> String {
-    TINY_RUNTIME_C.to_owned()
-}
-
-fn render_diagnostic_runtime_c() -> String {
-    DIAGNOSTIC_RUNTIME_C.to_owned()
-}
 
 fn strip_decompressor(path: &Path) {
     let _ = Command::new("strip").arg(path).output();

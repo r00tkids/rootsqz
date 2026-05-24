@@ -20,12 +20,7 @@
 
 .globl _main
 _main:
-    stp     x29, x30, [sp, #-128]!
-    mov     x29, sp
-    stp     x19, x20, [sp, #16]
-    stp     x21, x22, [sp, #32]
-    stp     x23, x24, [sp, #48]
-    stp     x25, x26, [sp, #64]
+    stp     x29, x30, [sp, #-16]!
     mov     x21, x0                 // argc
     mov     x22, x1                 // argv
     mov     x23, x2                 // envp
@@ -66,9 +61,5 @@ _main:
     mov     x3, x23
     bl      _rootsqz_launch_image
 
-    ldp     x25, x26, [sp, #64]
-    ldp     x23, x24, [sp, #48]
-    ldp     x21, x22, [sp, #32]
-    ldp     x19, x20, [sp, #16]
-    ldp     x29, x30, [sp], #128
+    ldp     x29, x30, [sp], #16
     ret
