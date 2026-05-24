@@ -119,7 +119,7 @@ pub fn compress_binary_with_model(binary: &[u8], model: Box<dyn Model>) -> Resul
 
     let (mut imports, fixups) = parse_chained_fixups(binary, &macho, &macho_segments, min_vm_addr)?;
     for import in &mut imports {
-        import.name = strip_macho_symbol_prefix(&import.name).to_owned();
+        import.name = import.name.clone();
     }
     let dylibs = macho
         .load_commands
@@ -221,6 +221,3 @@ fn align_up(value: u64, align: u64) -> u64 {
     (value + align - 1) & !(align - 1)
 }
 
-fn strip_macho_symbol_prefix(name: &str) -> &str {
-    name.strip_prefix('_').unwrap_or(name)
-}

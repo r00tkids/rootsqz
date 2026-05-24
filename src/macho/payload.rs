@@ -66,14 +66,14 @@ _rootsqz_imports_start:
         if import.weak {
             src.push_str(&format!(
                 ".weak_reference {}\n",
-                macho_external_symbol(&import.name),
+                import.name,
             ));
         }
     }
     for import in &packed.imports {
         src.push_str(&format!(
             "    .quad {}\n    .long {weak}\n    .long 0\n",
-            macho_external_symbol(&import.name),
+            import.name,
             weak = if import.weak { 1 } else { 0 },
         ));
     }
@@ -115,6 +115,3 @@ fn escape_assembly_path(path: &Path) -> String {
         .replace('"', "\\\"")
 }
 
-fn macho_external_symbol(name: &str) -> String {
-    format!("_{}", name)
-}

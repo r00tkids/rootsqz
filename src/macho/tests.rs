@@ -230,7 +230,7 @@ fn packed_macho_metadata_for_helloworld() {
     assert_eq!(packed.decode_chunks[1].size, 0x4000);
 
     assert_eq!(packed.imports.len(), 1);
-    assert_eq!(packed.imports[0].name, "puts");
+    assert_eq!(packed.imports[0].name, "_puts");
     assert!(!packed.imports[0].weak);
 
     assert_eq!(packed.fixups.len(), 1);
