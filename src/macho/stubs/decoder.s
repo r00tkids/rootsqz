@@ -78,75 +78,26 @@ _arithmetic_decoder_init:
     str     x10, [x9, #DEC_INPUT_END]
     ret
 
-.globl _arithmetic_decode_bit
-_arithmetic_decode_bit:
-    ldr     w9, [x0, #DEC_LOW]      // low
-    ldr     w10, [x0, #DEC_HIGH]    // high
-    ldr     w11, [x0, #DEC_STATE]   // state
-    ldr     x2, [x0, #DEC_INPUT]
-    ldr     x3, [x0, #DEC_INPUT_END]
-
-    sub     w12, w10, w9            // range = high - low
-    ucvtf   d1, w12
-    ucvtf   d2, w9
-    fmadd   d1, d1, d0, d2          // mid = range * p + low
-    fcvtzu  w12, d1                 // Rust's f64 as u32 truncates toward zero
-
-    cmp     w12, w10
-    b.lo    1f
-    sub     w12, w10, #1            // clamp when mid >= high
-1:
-    cmp     w11, w12
-    b.hi    2f
-    mov     w13, #1                 // bit = 1
-    mov     w10, w12                // high = mid
-    b       3f
-2:
-    mov     w13, #0                 // bit = 0
-    add     w9, w12, #1             // low = mid + 1
-
-3:
-    mov     w15, #TOP
-4:
-    eor     w14, w10, w9
-    cmp     w14, w15
-    b.hs    7f
-
-    lsl     w9, w9, #8
-    lsl     w10, w10, #8
-    orr     w10, w10, #0xff
-
-    cmp     x2, x3
-    b.hs    5f
-    ldrb    w14, [x2], #1
-    b       6f
-5:
-    mov     w14, #0
-6:
-    lsl     w11, w11, #8
-    orr     w11, w11, w14
-    b       4b
-
-7:
-    str     w9, [x0, #DEC_LOW]
-    str     w10, [x0, #DEC_HIGH]
-    str     w11, [x0, #DEC_STATE]
-    str     x2, [x0, #DEC_INPUT]
-    mov     w0, w13
-    ret
-
 .globl _arithmetic_decode_stream
 _arithmetic_decode_stream:
-    stp     x29, x30, [sp, #-64]!
+    stp     x29, x30, [sp, #-96]!
+    mov     x29, sp
     stp     x19, x20, [sp, #16]
     stp     x21, x22, [sp, #32]
     stp     x23, x24, [sp, #48]
+    stp     x25, x26, [sp, #64]
+    stp     x27, x28, [sp, #80]
 
     mov     x19, x0                 // ctx
     mov     x20, x1                 // output
     mov     x21, x2                 // bytes remaining
     adrp    x22, _rootsqz_model_ctx@PAGE
     add     x22, x22, _rootsqz_model_ctx@PAGEOFF
+
+    ldr     w25, [x19, #DEC_LOW]
+    ldr     w26, [x19, #DEC_HIGH]
+    ldr     w27, [x19, #DEC_STATE]
+    ldr     x28, [x19, #DEC_INPUT]
 
 1:
     cbz     x21, 5f
@@ -155,17 +106,57 @@ _arithmetic_decode_stream:
 
 2:
     mov     x0, x22
-    bl      _rootsqz_model_predict
+    bl      _rootsqz_model_predict  // d0 = squashed probability
 
-    mov     x0, x19
-    bl      _arithmetic_decode_bit
-    and     w9, w0, #1
+    // _arithmetic_decode_bit inlined: x25=low, x26=high, x27=state, x28=input
+    sub     w9, w26, w25            // range = high - low
+    ucvtf   d1, w9
+    ucvtf   d2, w25
+    fmadd   d1, d1, d0, d2          // mid = range * p + low
+    fcvtzu  w9, d1                  // Rust's f64 as u32 truncates toward zero
 
+    cmp     w9, w26
+    b.lo    3f
+    sub     w9, w26, #1             // clamp when mid >= high
+3:
+    cmp     w27, w9                 // state vs mid
+    b.hi    4f
+    mov     w10, #1                 // bit = 1
+    mov     w26, w9                 // high = mid
+    b       6f
+4:
+    mov     w10, #0                 // bit = 0
+    add     w25, w9, #1             // low = mid + 1
+
+6:
+    mov     w11, #TOP
+7:
+    eor     w12, w26, w25
+    cmp     w12, w11
+    b.hs    8f
+
+    lsl     w25, w25, #8
+    lsl     w26, w26, #8
+    orr     w26, w26, #0xff
+
+    ldr     x12, [x19, #DEC_INPUT_END]
+    cmp     x28, x12
+    b.hs    .Ldec_pad
+    ldrb    w12, [x28], #1
+    b       .Ldec_got_byte
+.Ldec_pad:
+    mov     w12, #0
+.Ldec_got_byte:
+    lsl     w27, w27, #8
+    orr     w27, w27, w12
+    b       7b
+
+8:
     lsl     w23, w23, #1
-    orr     w23, w23, w9
+    orr     w23, w23, w10
 
     mov     x0, x22
-    mov     w1, w9
+    mov     w1, w10
     bl      _rootsqz_model_learn
 
     subs    w24, w24, #1
@@ -176,8 +167,15 @@ _arithmetic_decode_stream:
     b       1b
 
 5:
+    str     w25, [x19, #DEC_LOW]
+    str     w26, [x19, #DEC_HIGH]
+    str     w27, [x19, #DEC_STATE]
+    str     x28, [x19, #DEC_INPUT]
+
+    ldp     x27, x28, [sp, #80]
+    ldp     x25, x26, [sp, #64]
     ldp     x23, x24, [sp, #48]
     ldp     x21, x22, [sp, #32]
     ldp     x19, x20, [sp, #16]
-    ldp     x29, x30, [sp], #64
+    ldp     x29, x30, [sp], #96
     ret

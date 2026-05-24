@@ -19,6 +19,17 @@
 .text
 .align 2
 
+// MODEL_HASH dst, src, tmp
+// dst = (0x9E35A7BD * (src ^ (src >> 3))) >> 3
+.macro MODEL_HASH dst, src, tmp
+    lsr     \tmp, \src, #3
+    eor     \dst, \src, \tmp
+    movz    \tmp, #0xa7bd
+    movk    \tmp, #0x9e35, lsl #16
+    mul     \dst, \dst, \tmp
+    lsr     \dst, \dst, #3
+.endmacro
+
 .equ NOB_CTX,        0
 .equ NOB_BIT_CTX,    4
 .equ NOB_MAGIC_NUM,  8
@@ -161,15 +172,10 @@ _rootsqz_norder_byte_learn:
     ldr     x23, [x19, #NOB_MASK]
     and     x22, x22, x23
 
-    lsr     x0, x22, #32
-    mov     w1, #3
-    bl      _rootsqz_model_hash
-    mov     w23, w0
+    lsr     x9, x22, #32
+    MODEL_HASH w23, w9, w10
 
-    mov     w0, w22
-    mov     w1, #3
-    bl      _rootsqz_model_hash
-    mov     w24, w0
+    MODEL_HASH w24, w22, w10
 
     add     w25, w23, w23, lsl #3
     add     w25, w25, w24

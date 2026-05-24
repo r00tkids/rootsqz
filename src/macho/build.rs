@@ -95,6 +95,7 @@ pub fn build_decompressor(
     command.arg("-fno-asynchronous-unwind-tables");
     command.arg("-Wl,-dead_strip");
     command.arg("-Wl,-x");
+    command.arg("-flto");
     command.arg("-Wl,-no_data_const");
     command.arg("-Wl,-no_function_starts");
     command.arg("-Wl,-no_source_version");

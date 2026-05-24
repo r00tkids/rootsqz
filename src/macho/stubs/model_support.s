@@ -10,19 +10,6 @@
 .equ rootsqz_U24_MAX, 0x00ffffff
 .equ rootsqz_NORDER_DATA_DEFAULT, 0x007fffff
 
-.globl _rootsqz_model_hash
-_rootsqz_model_hash:
-    // uint32_t hash(uint32_t value, uint32_t shift)
-    // value ^= value >> shift;
-    // return (0x9E35A7BDu * value) >> shift;
-    lsr     w2, w0, w1
-    eor     w0, w0, w2
-    movz    w2, #0xa7bd
-    movk    w2, #0x9e35, lsl #16
-    mul     w0, w0, w2
-    lsr     w0, w0, w1
-    ret
-
 .globl _rootsqz_probability_from_u24
 _rootsqz_probability_from_u24:
     // d0 = clamp((double)w0 / 0x00ffffff, eps, 1.0 - eps)
