@@ -84,6 +84,9 @@ _rootsqz_model_learn:
             ModelConfig::AdaptiveProbabilityMap(_) => {
                 bail!("Mach-O assembly decompressor does not support AdaptiveProbabilityMap yet")
             }
+            ModelConfig::Model4k => {
+                bail!("Mach-O assembly decompressor does not support Model4k yet")
+            }
         }
     }
 

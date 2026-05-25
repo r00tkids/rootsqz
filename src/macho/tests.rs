@@ -94,7 +94,7 @@ fn assembly_model_stubs_round_trip() {
         Box::new(NOrderByte::new_norder_model(
             0,
             Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(table_pow2))),
-            255,
+            15,
         )),
         render_norder_model_assembly(0, table_pow2, false),
     );
@@ -105,7 +105,7 @@ fn assembly_model_stubs_round_trip() {
         Box::new(NOrderByte::new_norder_model(
             0b0000_0011,
             Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(table_pow2))),
-            255,
+            15,
         )),
         render_norder_model_assembly(0b0000_0011, table_pow2, false),
     );
@@ -115,7 +115,7 @@ fn assembly_model_stubs_round_trip() {
         &binary,
         Box::new(NOrderByte::new_word_model(
             Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(table_pow2))),
-            255,
+            15,
         )),
         render_norder_model_assembly(0, table_pow2, true),
     );
@@ -125,8 +125,8 @@ fn assembly_model_stubs_round_trip() {
         "ln_mixer",
         &binary,
         Box::new(LnMixerPred::new(vec![
-            Box::new(NOrderByte::new_norder_model(0, shared_table.clone(), 255)),
-            Box::new(NOrderByte::new_norder_model(0b0000_0011, shared_table, 255)),
+            Box::new(NOrderByte::new_norder_model(0, shared_table.clone(), 15)),
+            Box::new(NOrderByte::new_norder_model(0b0000_0011, shared_table, 15)),
         ])),
         render_ln_mixer_model_assembly(table_pow2),
     );

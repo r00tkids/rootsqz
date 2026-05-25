@@ -64,10 +64,7 @@ _rootsqz_imports_start:
     );
     for import in &packed.imports {
         if import.weak {
-            src.push_str(&format!(
-                ".weak_reference {}\n",
-                import.name,
-            ));
+            src.push_str(&format!(".weak_reference {}\n", import.name,));
         }
     }
     for import in &packed.imports {
@@ -114,4 +111,3 @@ fn escape_assembly_path(path: &Path) -> String {
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
 }
-
