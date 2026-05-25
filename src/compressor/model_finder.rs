@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use super::{
     compress_config::ModelConfig,
-    model::{HashTable, Model, NOrderByteData},
+    model::{HashTable, Model, NOrderByteData, MODEL4K_NORDER_MASKS},
 };
 
 #[allow(dead_code)]
@@ -24,28 +24,7 @@ impl ModelFinder {
 }
 
 pub fn create_default_model_config() -> ModelConfig {
-    let mut byte_masks = Vec::new();
-
-    let mut byte_mask = 0;
-    byte_masks.push(byte_mask);
-    for i in 0..8 {
-        byte_mask |= 1 << i;
-        byte_masks.push(byte_mask);
-    }
-
-    let mut byte_mask = 0;
-    for i in 0..4 {
-        byte_mask |= 1 << i;
-        byte_masks.push(byte_mask << 1);
-    }
-
-    let mut byte_mask = 0;
-    for i in 0..4 {
-        byte_mask |= 1 << i;
-        byte_masks.push(byte_mask << 2);
-    }
-
-    let mut mixed_models = byte_masks
+    let mut mixed_models = MODEL4K_NORDER_MASKS
         .into_iter()
         .map(|mask| ModelConfig::NOrderByte {
             byte_mask: format!("0b{:08b}", mask),

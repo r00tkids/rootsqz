@@ -6,6 +6,12 @@ use std::{
     vec,
 };
 
+pub const MODEL4K_NORDER_MASKS: [u8; 17] = [
+    0, 1, 3, 7, 15, 31, 63, 127, 255, 2, 6, 14, 30, 4, 12, 28, 60,
+];
+pub const MODEL4K_NUM_MODELS: usize = MODEL4K_NORDER_MASKS.len() + 1;
+pub const MODEL4K_TABLE_POW2: u32 = 26;
+
 pub trait Model {
     fn pred(&mut self) -> f64;
     fn learn(&mut self, bit: u8);
@@ -298,32 +304,11 @@ pub struct Model4k {
     mixer: LnMixerPred,
 }
 
-impl Default for Model4k {
-    fn default() -> Self {
-        let mut byte_masks = Vec::new();
+impl Model4k {
+    pub fn new(table_pow2: u32) -> Self {
+        let hash_table = Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(table_pow2)));
 
-        let mut byte_mask = 0;
-        byte_masks.push(byte_mask);
-        for i in 0..8 {
-            byte_mask |= 1 << i;
-            byte_masks.push(byte_mask);
-        }
-
-        let mut byte_mask = 0;
-        for i in 0..4 {
-            byte_mask |= 1 << i;
-            byte_masks.push(byte_mask << 1);
-        }
-
-        let mut byte_mask = 0;
-        for i in 0..4 {
-            byte_mask |= 1 << i;
-            byte_masks.push(byte_mask << 2);
-        }
-
-        let hash_table = Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(26)));
-
-        let mixed_models = byte_masks
+        let mixed_models = MODEL4K_NORDER_MASKS
             .into_iter()
             .map(|mask| {
                 Box::new(NOrderByte::new_norder_model(mask, hash_table.clone(), 15))
@@ -340,12 +325,20 @@ impl Default for Model4k {
     }
 }
 
+impl Default for Model4k {
+    fn default() -> Self {
+        Self::new(MODEL4K_TABLE_POW2)
+    }
+}
+
 impl Model for Model4k {
     fn pred(&mut self) -> f64 {
-        0.5
+        self.mixer.pred()
     }
 
-    fn learn(&mut self, _bit: u8) {}
+    fn learn(&mut self, bit: u8) {
+        self.mixer.learn(bit);
+    }
 }
 
 #[derive(Clone, Default)]

@@ -6,10 +6,12 @@ use std::{
     rc::Rc,
 };
 
-use crate::compressor::model::{HashTable, LnMixerPred, Model, NOrderByte, NOrderByteData};
+use crate::compressor::model::{
+    HashTable, LnMixerPred, Model, Model4k, NOrderByte, NOrderByteData,
+};
 
 use super::{
-    assembly::NORDER_RECORD_BYTES,
+    assembly::{render_model4k_assembly, NORDER_RECORD_BYTES},
     fixups::{read_u32_at, FIXUP_KIND_BIND},
     model::LoadCommand,
     pack::compress_binary_with_model,
@@ -129,6 +131,13 @@ fn assembly_model_stubs_round_trip() {
             Box::new(NOrderByte::new_norder_model(0b0000_0011, shared_table, 15)),
         ])),
         render_ln_mixer_model_assembly(table_pow2),
+    );
+
+    run_assembly_model_round_trip(
+        "model4k",
+        &binary,
+        Box::new(Model4k::new(table_pow2)),
+        render_model4k_assembly(table_pow2),
     );
 }
 

@@ -10,11 +10,11 @@ pub use encoder::Encoder;
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::File, io::Read};
+    use std::{cell::RefCell, fs::File, io::Read, rc::Rc};
 
     use super::coder::tests::ArithmeticDecoder;
-    use super::model::Model;
-    use super::model_finder::ModelFinder;
+    use super::model::{HashTable, Model, Model4k, NOrderByteData};
+    use super::model_finder::{create_default_model_config, ModelFinder};
     use super::utils::prob_squash;
     use crate::compressor::Encoder;
     use anyhow::Result;
@@ -98,5 +98,34 @@ mod tests {
 
         let decode_res = decoder.decode(test_bytes.len()).unwrap();
         assert!(String::from_utf8(decode_res).unwrap() == test_data);
+    }
+
+    #[test]
+    fn model4k_matches_expanded_default_model() {
+        let table_pow2 = 10;
+        let hash_table = Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(table_pow2)));
+        let mut expanded = create_default_model_config()
+            .create_model(hash_table)
+            .expect("Failed to create expanded default model");
+        let mut model4k = Model4k::new(table_pow2);
+
+        let input = (0u8..=255)
+            .chain([0x00, 0xff, 0x55, 0xaa])
+            .collect::<Vec<_>>();
+        for byte in input {
+            for bit_idx in 0..8 {
+                let bit = (byte >> (7 - bit_idx)) & 1;
+                let expanded_p = expanded.pred();
+                let model4k_p = model4k.pred();
+
+                assert!(
+                    (expanded_p - model4k_p).abs() <= f64::EPSILON,
+                    "prediction mismatch for byte {byte:#04x}, bit {bit_idx}: {expanded_p} != {model4k_p}",
+                );
+
+                expanded.learn(bit);
+                model4k.learn(bit);
+            }
+        }
     }
 }
