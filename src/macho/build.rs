@@ -7,8 +7,10 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
+use crate::compressor::compress_config::ModelConfig;
+
 use super::{
-    assembly::render_model4k_assembly, pack::CompressedMacho, payload::render_payload_assembly,
+    assembly::render_model_assembly, pack::CompressedMacho, payload::render_payload_assembly,
     DEFAULT_NORDER_TABLE_POW2,
 };
 
@@ -23,6 +25,7 @@ const DIAGNOSTIC_RUNTIME_C: &str = include_str!("stubs/diagnostic_runtime.c");
 
 pub fn build_decompressor(
     output_dir: &Path,
+    model_config: &ModelConfig,
     compressed_path: &Path,
     packed: &CompressedMacho,
     diagnostics: bool,
@@ -52,16 +55,24 @@ pub fn build_decompressor(
         ),
         (
             "model.s",
-            render_model4k_assembly(DEFAULT_NORDER_TABLE_POW2),
+            render_model_assembly(model_config, DEFAULT_NORDER_TABLE_POW2)?,
         ),
-        ("norder_byte.s", NORDER_BYTE_S.to_owned()),
-        ("word.s", WORD_S.to_owned()),
-        ("ln_mixer.s", LN_MIXER_S.to_owned()),
     ];
     if diagnostics {
         sources.push(("runtime.c", DIAGNOSTIC_RUNTIME_C.to_owned()));
     } else {
         sources.push(("runtime.s", TINY_RUNTIME_S.to_owned()));
+    }
+
+    let model_features = ModelFeatures::from_config(model_config);
+    if model_features.norder_byte {
+        sources.push(("norder_byte.s", NORDER_BYTE_S.to_owned()));
+    }
+    if model_features.word {
+        sources.push(("word.s", WORD_S.to_owned()));
+    }
+    if model_features.ln_mixer {
+        sources.push(("ln_mixer.s", LN_MIXER_S.to_owned()));
     }
 
     let mut source_paths = Vec::with_capacity(sources.len());
@@ -104,6 +115,45 @@ pub fn build_decompressor(
     }
 
     Ok(decompressor_path)
+}
+
+#[derive(Default)]
+struct ModelFeatures {
+    norder_byte: bool,
+    word: bool,
+    ln_mixer: bool,
+}
+
+impl ModelFeatures {
+    fn from_config(config: &ModelConfig) -> Self {
+        let mut features = Self::default();
+        features.visit(config);
+        features
+    }
+
+    fn visit(&mut self, config: &ModelConfig) {
+        match config {
+            ModelConfig::NOrderByte { .. } => {
+                self.norder_byte = true;
+            }
+            ModelConfig::Mixer { models } => {
+                self.ln_mixer = true;
+                for model in models {
+                    self.visit(model);
+                }
+            }
+            ModelConfig::AdaptiveProbabilityMap(_) => {}
+            ModelConfig::Word => {
+                self.norder_byte = true;
+                self.word = true;
+            }
+            ModelConfig::Model4k => {
+                self.norder_byte = true;
+                self.word = true;
+                self.ln_mixer = true;
+            }
+        }
+    }
 }
 
 fn strip_decompressor(path: &Path) {

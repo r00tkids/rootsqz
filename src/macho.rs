@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
 
 use anyhow::{Context, Result};
 
@@ -13,9 +13,12 @@ mod payload;
 #[cfg(test)]
 mod tests;
 
-use crate::compressor::model::{Model4k, MODEL4K_TABLE_POW2};
+use crate::compressor::{
+    model::{HashTable, NOrderByteData},
+    model_finder::create_default_model_config,
+};
 
-const DEFAULT_NORDER_TABLE_POW2: u32 = MODEL4K_TABLE_POW2;
+const DEFAULT_NORDER_TABLE_POW2: u32 = 26;
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -40,7 +43,12 @@ pub fn run(args: Args) -> Result<()> {
     let binary = fs::read(&args.input)
         .with_context(|| format!("Failed to read {}", args.input.display()))?;
 
-    let model = Box::new(Model4k::default());
+    let model_config = create_default_model_config();
+    let model = model_config
+        .create_model(Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(
+            DEFAULT_NORDER_TABLE_POW2,
+        ))))
+        .context("Failed to create compression model")?;
     let compressed_macho = pack::compress_binary_with_model(&binary, model)?;
     let total_uncompressed = compressed_macho.uncompressed.len();
 
@@ -67,6 +75,7 @@ pub fn run(args: Args) -> Result<()> {
 
     let decompressor_path = build::build_decompressor(
         &output_dir,
+        &model_config,
         &out_path,
         &compressed_macho,
         args.diagnostics,
