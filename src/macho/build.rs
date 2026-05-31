@@ -143,11 +143,6 @@ impl ModelFeatures {
                 self.norder_byte = true;
                 self.word = true;
             }
-            ModelConfig::Model4k => {
-                self.norder_byte = true;
-                self.word = true;
-                self.ln_mixer = true;
-            }
         }
     }
 }

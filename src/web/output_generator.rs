@@ -86,9 +86,6 @@ fn generate_js_ctors(model_config: &ModelConfig, features_used: &mut ModelRef) -
             *features_used |= ModelRef::Word;
             "NOrderByte(0, 1)".to_string()
         }
-        ModelConfig::Model4k => {
-            format!("throw new Error('Model4k is not supported in JS decompressor')")
-        }
     }
 }
 

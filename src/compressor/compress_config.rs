@@ -3,8 +3,6 @@ use std::{cell::RefCell, rc::Rc};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::compressor::model::Model4k;
-
 use super::model::{
     AdaptiveProbabilityMap, HashTable, LnMixerPred, Model, NOrderByte, NOrderByteData,
 };
@@ -13,6 +11,24 @@ use super::model::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressConfig {
     pub model: ModelConfig,
+    pub static_model_params: StaticModelParams,
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticModelParams {
+    mixer: MixerModelParams,
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MixerModelParams {
+    #[serde(default)]
+    learning_rate: Option<f64>,
+    #[serde(default)]
+    context_learning_rate: Option<f64>,
+    #[serde(default)]
+    context_fixed_weight: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,8 +38,6 @@ pub enum ModelConfig {
     Mixer { models: Vec<ModelConfig> },
     AdaptiveProbabilityMap(Box<ModelConfig>),
     Word,
-    // A predefined model that uses NOrderByte and mixer, optimized for being procedurally generated
-    Model4k,
 }
 
 impl ModelConfig {
@@ -46,7 +60,6 @@ impl ModelConfig {
                 AdaptiveProbabilityMap::new(19, model_config.create_model(hash_table.clone())?),
             ),
             ModelConfig::Word => Box::new(NOrderByte::new_word_model(hash_table, 15)),
-            ModelConfig::Model4k => Box::new(Model4k::default()),
         })
     }
 }

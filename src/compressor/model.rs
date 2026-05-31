@@ -296,60 +296,6 @@ impl Model for LnMixerPred {
     }
 }
 
-pub struct Model4k {
-    mixer: LnMixerPred,
-}
-
-impl Default for Model4k {
-    fn default() -> Self {
-        let mut byte_masks = Vec::new();
-
-        let mut byte_mask = 0;
-        byte_masks.push(byte_mask);
-        for i in 0..8 {
-            byte_mask |= 1 << i;
-            byte_masks.push(byte_mask);
-        }
-
-        let mut byte_mask = 0;
-        for i in 0..4 {
-            byte_mask |= 1 << i;
-            byte_masks.push(byte_mask << 1);
-        }
-
-        let mut byte_mask = 0;
-        for i in 0..4 {
-            byte_mask |= 1 << i;
-            byte_masks.push(byte_mask << 2);
-        }
-
-        let hash_table = Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(26)));
-
-        let mixed_models = byte_masks
-            .into_iter()
-            .map(|mask| {
-                Box::new(NOrderByte::new_norder_model(mask, hash_table.clone(), 15))
-                    as Box<dyn Model>
-            })
-            .chain(std::iter::once(
-                Box::new(NOrderByte::new_word_model(hash_table.clone(), 15)) as Box<dyn Model>,
-            ))
-            .collect::<Vec<_>>();
-
-        Self {
-            mixer: LnMixerPred::new(mixed_models),
-        }
-    }
-}
-
-impl Model for Model4k {
-    fn pred(&mut self) -> f64 {
-        0.5
-    }
-
-    fn learn(&mut self, _bit: u8) {}
-}
-
 #[derive(Clone, Default)]
 pub struct SSEPredData([NOrderByteData; 32]);
 
