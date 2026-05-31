@@ -243,8 +243,10 @@ impl Model for LnMixerPred {
         let mut i = 0;
         for model in &mut self.models_with_weight {
             let model_weight = if weights.is_empty() {
+                // We don't have 1-order weight so just use the context independent weight
                 model.weight
             } else {
+                // Mix in 1-order weight with context independent weight
                 f64::mul_add(weights[i], 0.3, model.weight)
             };
 
