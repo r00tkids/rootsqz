@@ -35,7 +35,7 @@ pub struct Args {
     pub diagnostics: bool,
 
     /// Export the decompressor as a self-extracting shell script
-    #[arg(long)]
+    #[arg(long = "no-wrapper-script", action = clap::ArgAction::SetFalse, default_value_t = true)]
     pub wrapper_script: bool,
 }
 

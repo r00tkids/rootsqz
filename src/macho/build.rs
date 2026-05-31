@@ -83,11 +83,6 @@ pub fn build_decompressor(
     }
 
     let decompressor_path = output_dir.join("decompressor");
-    let native_decompressor_path = if wrapper_script {
-        build_dir.join("decompressor.macho")
-    } else {
-        decompressor_path.clone()
-    };
     let mut command = Command::new("clang");
     command.arg("-arch").arg("arm64");
     command.arg("-Oz");
@@ -105,13 +100,14 @@ pub fn build_decompressor(
     for path in &source_paths {
         command.arg(path);
     }
-    command.arg("-o").arg(&native_decompressor_path);
+    command.arg("-o").arg(&decompressor_path);
 
     let output = command.output().context("Failed to run clang")?;
     assert_command_success("build Mach-O decompressor", &output)?;
-    strip_decompressor(&native_decompressor_path);
+    strip_decompressor(&decompressor_path);
     if wrapper_script {
-        write_wrapper_script(&native_decompressor_path, &decompressor_path)?;
+        let wrapper_script_path = output_dir.join("decompressor.sh");
+        write_wrapper_script(&decompressor_path, &wrapper_script_path)?;
     }
 
     Ok(decompressor_path)
