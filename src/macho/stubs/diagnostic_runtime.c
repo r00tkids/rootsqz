@@ -105,6 +105,7 @@ static void protect_segments(uint8_t *image) {
 }
 
 int rootsqz_launch_image(uint8_t *image, int argc, char **argv, char **envp) {
+    printf("Testing!\n");
     apply_fixups(image);
     protect_segments(image);
     __builtin___clear_cache((char *)image, (char *)image + rootsqz_image_size);
