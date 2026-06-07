@@ -7,6 +7,8 @@ CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-unwind-tables -fno-asynchronous-unwind-tables
 CFLAGS += -Wl,-dead_strip
 CFLAGS += -Wl,-x
+CFLAGS += -Wl,-no_data_const 
+CFLAGS += -Wl,-no_function_starts
 
 helloworld: helloworld.c
 	clang $(CFLAGS) -o $@ $<

@@ -14,7 +14,6 @@
 .text
 .align 2
 
-.extern _arithmetic_decoder_init
 .extern _arithmetic_decode_stream
 
 .extern _rootsqz_compressed_start
@@ -38,8 +37,31 @@ _main:
     add     x2, x2, _rootsqz_compressed_end@PAGEOFF
     sub     x2, x2, x1
     add     x20, sp, #96
-    mov     x0, x20
-    bl      _arithmetic_decoder_init
+    // inlined arithmetic_decoder_init(ctx=x20, input=x1, input_len=x2):
+    add     x10, x1, x2             // input_end
+    mov     w11, #0                 // state
+    mov     w12, #4
+.Ldinit_loop:
+    cmp     x1, x10
+    b.hs    .Ldinit_pad
+    ldrb    w13, [x1], #1
+    b       .Ldinit_got_byte
+.Ldinit_pad:
+    mov     w13, #0
+.Ldinit_got_byte:
+    lsl     w11, w11, #8
+    orr     w11, w11, w13
+    subs    w12, w12, #1
+    b.ne    .Ldinit_loop
+    mov     w13, #0
+    str     w13, [x20, #0]          // DEC_LOW
+    mov     w13, #-1
+    str     w13, [x20, #4]          // DEC_HIGH
+    str     w11, [x20, #8]          // DEC_STATE
+    mov     w13, #0
+    str     w13, [x20, #12]         // DEC_PAD
+    str     x1, [x20, #16]          // DEC_INPUT
+    str     x10, [x20, #24]         // DEC_INPUT_END
 
     bl      _rootsqz_prepare_image
     mov     x19, x0                 // mapped app image
@@ -123,36 +145,6 @@ _main:
 .equ DEC_INPUT_END, 24
 .equ TOP,           0x01000000
 
-.globl _arithmetic_decoder_init
-_arithmetic_decoder_init:
-    mov     x9, x0                  // ctx
-    add     x10, x1, x2             // input_end
-    mov     w11, #0                 // state
-    mov     w12, #4
-
-1:
-    cmp     x1, x10
-    b.hs    2f
-    ldrb    w13, [x1], #1
-    b       3f
-2:
-    mov     w13, #0
-3:
-    lsl     w11, w11, #8
-    orr     w11, w11, w13
-    subs    w12, w12, #1
-    b.ne    1b
-
-    mov     w13, #0
-    str     w13, [x9, #DEC_LOW]
-    mov     w13, #-1
-    str     w13, [x9, #DEC_HIGH]
-    str     w11, [x9, #DEC_STATE]
-    mov     w13, #0
-    str     w13, [x9, #DEC_PAD]
-    str     x1, [x9, #DEC_INPUT]
-    str     x10, [x9, #DEC_INPUT_END]
-    ret
 
 .globl _arithmetic_decode_stream
 _arithmetic_decode_stream:
@@ -272,41 +264,6 @@ _arithmetic_decode_stream:
 .equ rootsqz_U24_MAX, 0x00ffffff
 .equ rootsqz_NORDER_DATA_DEFAULT, 0x007fffff
 
-.globl _rootsqz_probability_from_u24
-_rootsqz_probability_from_u24:
-    // d0 = clamp((double)w0 / 0x00ffffff, eps, 1.0 - eps)
-    cbnz    w0, 1f
-    mov     w0, #1
-    b       2f
-1:
-    movz    w9, #0xffff
-    movk    w9, #0x00ff, lsl #16
-    cmp     w0, w9
-    b.ne    2f
-    sub     w0, w9, #1
-2:
-    adrp    x9, _rootsqz_u24_max_double@PAGE
-    add     x9, x9, _rootsqz_u24_max_double@PAGEOFF
-    ucvtf   d0, w0
-    ldr     d1, [x9]
-    fdiv    d0, d0, d1
-    ret
-
-.globl _rootsqz_prob_stretch_u24
-_rootsqz_prob_stretch_u24:
-    // d0 = log(p / (1.0 - p)), where p is the clamped u24 probability.
-    stp     x29, x30, [sp, #-16]!
-    mov     x29, sp
-
-    bl      _rootsqz_probability_from_u24
-    fmov    d2, d0
-    fmov    d1, #1.00000000
-    fsub    d1, d1, d2
-    fdiv    d0, d2, d1
-    bl      _log
-
-    ldp     x29, x30, [sp], #16
-    ret
 
 .globl _rootsqz_prob_squash
 _rootsqz_prob_squash:
@@ -378,6 +335,8 @@ _rootsqz_u24_max_double:
 
 .globl _rootsqz_norder_byte_predict
 _rootsqz_norder_byte_predict:
+    stp     x29, x30, [sp, #-16]!
+    mov     x29, sp
     ldr     w9, [x0, #NOB_CTX]
     ldr     w10, [x0, #NOB_BIT_CTX]
     eor     w9, w9, w10
@@ -388,12 +347,31 @@ _rootsqz_norder_byte_predict:
     cbnz    w0, 1f
     movz    w0, #0xffff
     movk    w0, #0x007f, lsl #16
-
 1:
     movz    w9, #0xffff
     movk    w9, #0x00ff, lsl #16
-    and     w0, w0, w9
-    b       _rootsqz_prob_stretch_u24
+    and     w0, w0, w9              // w9 = 0x00ffffff, reused below
+    // inlined prob_stretch_u24(probability_from_u24(w0)): d0 = log(p/(1-p))
+    cbnz    w0, 2f
+    mov     w0, #1
+    b       3f
+2:
+    cmp     w0, w9
+    b.ne    3f
+    sub     w0, w9, #1
+3:
+    adrp    x9, _rootsqz_u24_max_double@PAGE
+    add     x9, x9, _rootsqz_u24_max_double@PAGEOFF
+    ucvtf   d0, w0
+    ldr     d1, [x9]
+    fdiv    d0, d0, d1
+    fmov    d2, d0
+    fmov    d1, #1.00000000
+    fsub    d1, d1, d2
+    fdiv    d0, d2, d1
+    bl      _log
+    ldp     x29, x30, [sp], #16
+    ret
 
 .globl _rootsqz_norder_byte_learn
 _rootsqz_norder_byte_learn:
@@ -596,22 +574,6 @@ _rootsqz_word_learn:
 
 .globl _rootsqz_ln_mixer_predict_stretched
 _rootsqz_ln_mixer_predict_stretched:
-    stp     x29, x30, [sp, #-32]!
-    mov     x29, sp
-    str     x19, [sp, #16]
-    mov     x19, x0
-
-    bl      _rootsqz_ln_mixer_predict_sum
-    str     d0, [sp, #24]
-    bl      _rootsqz_prob_squash
-    str     d0, [x19, #LNM_LAST_TOTAL_P]
-    ldr     d0, [sp, #24]
-
-    ldr     x19, [sp, #16]
-    ldp     x29, x30, [sp], #32
-    ret
-
-_rootsqz_ln_mixer_predict_sum:
     stp     x29, x30, [sp, #-112]!
     mov     x29, sp
     stp     x19, x20, [sp, #16]
@@ -668,7 +630,12 @@ _rootsqz_ln_mixer_predict_sum:
     b       1b
 
 3:
-    ldr     d0, [sp, #96]
+    ldr     d0, [sp, #96]           // d0 = sum (stretched prediction)
+    str     d0, [sp, #104]          // save for return
+    bl      _rootsqz_prob_squash    // d0 = squash(sum)
+    str     d0, [x19, #LNM_LAST_TOTAL_P]
+    ldr     d0, [sp, #104]          // return stretched sum
+
     ldp     x27, x28, [sp, #80]
     ldp     x25, x26, [sp, #64]
     ldp     x23, x24, [sp, #48]
