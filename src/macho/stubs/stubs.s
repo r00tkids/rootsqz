@@ -23,7 +23,7 @@
 .extern _rootsqz_prepare_image
 .extern _rootsqz_launch_image
 
-.globl _main
+.private_extern _main
 _main:
     stp     x29, x30, [sp, #-16]!
     mov     x21, x0                 // argc
@@ -146,7 +146,7 @@ _main:
 .equ TOP,           0x01000000
 
 
-.globl _arithmetic_decode_stream
+.private_extern _arithmetic_decode_stream
 _arithmetic_decode_stream:
     stp     x29, x30, [sp, #-96]!
     mov     x29, sp
@@ -265,7 +265,7 @@ _arithmetic_decode_stream:
 .equ rootsqz_NORDER_DATA_DEFAULT, 0x007fffff
 
 
-.globl _rootsqz_prob_squash
+.private_extern _rootsqz_prob_squash
 _rootsqz_prob_squash:
     // d0 = 1.0 / (1.0 + exp(-d0))
     stp     x29, x30, [sp, #-16]!
@@ -282,7 +282,7 @@ _rootsqz_prob_squash:
 
 .section __TEXT,__literal8,8byte_literals
 .p2align 3
-.globl _rootsqz_u24_max_double
+.private_extern _rootsqz_u24_max_double
 _rootsqz_u24_max_double:
     .double 16777215.0
 
@@ -333,7 +333,7 @@ _rootsqz_u24_max_double:
 .equ NOB_HASH_MASK, 48
 .equ NOB_SIZE,      56
 
-.globl _rootsqz_norder_byte_predict
+.private_extern _rootsqz_norder_byte_predict
 _rootsqz_norder_byte_predict:
     stp     x29, x30, [sp, #-16]!
     mov     x29, sp
@@ -373,7 +373,7 @@ _rootsqz_norder_byte_predict:
     ldp     x29, x30, [sp], #16
     ret
 
-.globl _rootsqz_norder_byte_learn
+.private_extern _rootsqz_norder_byte_learn
 _rootsqz_norder_byte_learn:
     stp     x29, x30, [sp, #-80]!
     mov     x29, sp
@@ -528,11 +528,11 @@ L_rootsqz_norder_learning_bias:
 .text
 .align 2
 
-.globl _rootsqz_word_predict
+.private_extern _rootsqz_word_predict
 _rootsqz_word_predict:
     b       _rootsqz_norder_byte_predict
 
-.globl _rootsqz_word_learn
+.private_extern _rootsqz_word_learn
 _rootsqz_word_learn:
     b       _rootsqz_norder_byte_learn
 
@@ -572,7 +572,7 @@ _rootsqz_word_learn:
 .equ LNM_LAST_P,         72
 .equ LNM_SIZE,           80
 
-.globl _rootsqz_ln_mixer_predict_stretched
+.private_extern _rootsqz_ln_mixer_predict_stretched
 _rootsqz_ln_mixer_predict_stretched:
     stp     x29, x30, [sp, #-112]!
     mov     x29, sp
@@ -644,7 +644,7 @@ _rootsqz_ln_mixer_predict_stretched:
     ldp     x29, x30, [sp], #112
     ret
 
-.globl _rootsqz_ln_mixer_learn
+.private_extern _rootsqz_ln_mixer_learn
 _rootsqz_ln_mixer_learn:
     stp     x29, x30, [sp, #-128]!
     mov     x29, sp

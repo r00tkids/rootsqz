@@ -6,22 +6,22 @@ pub fn render_payload_assembly(compressed_path: &Path, packed: &CompressedMacho)
     let mut src = format!(
         r#".section __DATA,__const
 .p2align 3
-.globl _rootsqz_compressed_start
+.private_extern _rootsqz_compressed_start
 _rootsqz_compressed_start:
 .incbin "{compressed_path}"
-.globl _rootsqz_compressed_end
+.private_extern _rootsqz_compressed_end
 _rootsqz_compressed_end:
 
 .p2align 3
-.globl _rootsqz_image_size
+.private_extern _rootsqz_image_size
 _rootsqz_image_size:
     .quad {image_size}
-.globl _rootsqz_entry_offset
+.private_extern _rootsqz_entry_offset
 _rootsqz_entry_offset:
     .quad {entry_offset}
 
 .p2align 3
-.globl _rootsqz_decode_chunks_start
+.private_extern _rootsqz_decode_chunks_start
 _rootsqz_decode_chunks_start:
 "#,
         compressed_path = escape_assembly_path(compressed_path),
@@ -37,11 +37,11 @@ _rootsqz_decode_chunks_start:
         ));
     }
     src.push_str(
-        r#".globl _rootsqz_decode_chunks_end
+        r#".private_extern _rootsqz_decode_chunks_end
 _rootsqz_decode_chunks_end:
 
 .p2align 3
-.globl _rootsqz_segments_start
+.private_extern _rootsqz_segments_start
 _rootsqz_segments_start:
 "#,
     );
@@ -54,11 +54,11 @@ _rootsqz_segments_start:
         ));
     }
     src.push_str(
-        r#".globl _rootsqz_segments_end
+        r#".private_extern _rootsqz_segments_end
 _rootsqz_segments_end:
 
 .p2align 3
-.globl _rootsqz_imports_start
+.private_extern _rootsqz_imports_start
 _rootsqz_imports_start:
 "#,
     );
@@ -75,7 +75,7 @@ _rootsqz_imports_start:
         ));
     }
     src.push_str(
-        r#".globl _rootsqz_imports_end
+        r#".private_extern _rootsqz_imports_end
 _rootsqz_imports_end:
 "#,
     );
@@ -83,7 +83,7 @@ _rootsqz_imports_end:
     src.push_str(
         r#"
 .p2align 3
-.globl _rootsqz_fixups_start
+.private_extern _rootsqz_fixups_start
 _rootsqz_fixups_start:
 "#,
     );
@@ -99,7 +99,7 @@ _rootsqz_fixups_start:
         ));
     }
     src.push_str(
-        r#".globl _rootsqz_fixups_end
+        r#".private_extern _rootsqz_fixups_end
 _rootsqz_fixups_end:
 "#,
     );

@@ -39,7 +39,7 @@ impl ModelAssemblyGenerator {
             r#"
 .text
 .align 2
-.globl _rootsqz_model_predict
+.private_extern _rootsqz_model_predict
 _rootsqz_model_predict:
     stp     x29, x30, [sp, #-16]!
     mov     x29, sp
@@ -48,7 +48,7 @@ _rootsqz_model_predict:
     ldp     x29, x30, [sp], #16
     ret
 
-.globl _rootsqz_model_learn
+.private_extern _rootsqz_model_learn
 _rootsqz_model_learn:
     b       {learn}
 "#,
@@ -117,7 +117,7 @@ _rootsqz_model_learn:
 
         self.src.push_str(".section __DATA,__data\n.p2align 3\n");
         if ctx_symbol.starts_with('_') {
-            self.src.push_str(&format!(".globl {ctx_symbol}\n"));
+            self.src.push_str(&format!(".private_extern {ctx_symbol}\n"));
         }
         self.src.push_str(&format!(
             r#"{ctx_symbol}:
@@ -172,7 +172,7 @@ _rootsqz_model_learn:
 
         self.src.push_str(".section __DATA,__data\n.p2align 3\n");
         if ctx_symbol.starts_with('_') {
-            self.src.push_str(&format!(".globl {ctx_symbol}\n"));
+            self.src.push_str(&format!(".private_extern {ctx_symbol}\n"));
         }
         self.src.push_str(&format!(
             r#"{ctx_symbol}:

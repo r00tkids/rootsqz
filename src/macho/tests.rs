@@ -363,51 +363,51 @@ fn render_payload_assembly(
     format!(
         r#".section __DATA,__const
 .p2align 3
-.globl _rootsqz_compressed_start
+.private_extern _rootsqz_compressed_start
 _rootsqz_compressed_start:
 .incbin "{compressed_path}"
-.globl _rootsqz_compressed_end
+.private_extern _rootsqz_compressed_end
 _rootsqz_compressed_end:
 
 .p2align 3
-.globl _rootsqz_expected_start
+.private_extern _rootsqz_expected_start
 _rootsqz_expected_start:
 .incbin "{expected_path}"
-.globl _rootsqz_expected_end
+.private_extern _rootsqz_expected_end
 _rootsqz_expected_end:
 
 .p2align 3
-.globl _rootsqz_image_size
+.private_extern _rootsqz_image_size
 _rootsqz_image_size:
     .quad {output_len}
-.globl _rootsqz_entry_offset
+.private_extern _rootsqz_entry_offset
 _rootsqz_entry_offset:
     .quad 0
 
 .p2align 3
-.globl _rootsqz_decode_chunks_start
+.private_extern _rootsqz_decode_chunks_start
 _rootsqz_decode_chunks_start:
     .quad 0
     .quad {output_len}
-.globl _rootsqz_decode_chunks_end
+.private_extern _rootsqz_decode_chunks_end
 _rootsqz_decode_chunks_end:
 
 .p2align 3
-.globl _rootsqz_segments_start
+.private_extern _rootsqz_segments_start
 _rootsqz_segments_start:
-.globl _rootsqz_segments_end
+.private_extern _rootsqz_segments_end
 _rootsqz_segments_end:
 
 .p2align 3
-.globl _rootsqz_imports_start
+.private_extern _rootsqz_imports_start
 _rootsqz_imports_start:
-.globl _rootsqz_imports_end
+.private_extern _rootsqz_imports_end
 _rootsqz_imports_end:
 
 .p2align 3
-.globl _rootsqz_fixups_start
+.private_extern _rootsqz_fixups_start
 _rootsqz_fixups_start:
-.globl _rootsqz_fixups_end
+.private_extern _rootsqz_fixups_end
 _rootsqz_fixups_end:
 "#,
         compressed_path = escape_assembly_path(compressed_path),
@@ -446,7 +446,7 @@ fn render_norder_model_assembly(byte_mask: u8, table_pow2: u32, is_word: bool) -
     format!(
         r#".section __DATA,__data
 .p2align 3
-.globl _rootsqz_model_ctx
+.private_extern _rootsqz_model_ctx
 _rootsqz_model_ctx:
     .long 0
     .long 1
@@ -465,7 +465,7 @@ _rootsqz_norder_table:
 
 .text
 .align 2
-.globl _rootsqz_model_predict
+.private_extern _rootsqz_model_predict
 _rootsqz_model_predict:
     stp     x29, x30, [sp, #-16]!
     mov     x29, sp
@@ -474,7 +474,7 @@ _rootsqz_model_predict:
     ldp     x29, x30, [sp], #16
     ret
 
-.globl _rootsqz_model_learn
+.private_extern _rootsqz_model_learn
 _rootsqz_model_learn:
     b       {learn_fn}
 "#,
@@ -496,7 +496,7 @@ fn render_ln_mixer_model_assembly(table_pow2: u32) -> String {
     format!(
         r#".section __DATA,__data
 .p2align 3
-.globl _rootsqz_model_ctx
+.private_extern _rootsqz_model_ctx
 _rootsqz_model_ctx:
     .long {num_models}
     .long 1
@@ -566,7 +566,7 @@ _rootsqz_mixer_ctx_weights:
 
 .text
 .align 2
-.globl _rootsqz_model_predict
+.private_extern _rootsqz_model_predict
 _rootsqz_model_predict:
     stp     x29, x30, [sp, #-16]!
     mov     x29, sp
@@ -575,7 +575,7 @@ _rootsqz_model_predict:
     ldp     x29, x30, [sp], #16
     ret
 
-.globl _rootsqz_model_learn
+.private_extern _rootsqz_model_learn
 _rootsqz_model_learn:
     b       _rootsqz_ln_mixer_learn
 "#,
