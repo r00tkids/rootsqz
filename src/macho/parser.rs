@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(segments.len(), 4);
         assert_eq!(segments[0].name, "__PAGEZERO");
         assert_eq!(segments[1].name, "__TEXT");
-        assert_eq!(segments[2].name, "__DATA_CONST");
+        assert_eq!(segments[2].name, "__DATA");
         assert_eq!(segments[3].name, "__LINKEDIT");
 
         let text = &segments[1];
@@ -328,8 +328,8 @@ mod tests {
         assert_eq!(
             *uuid,
             [
-                0x51, 0x8C, 0xAE, 0x44, 0xEF, 0xD5, 0x37, 0x1C, 0x94, 0x6D, 0xD8, 0xFF, 0x57, 0x92,
-                0x0C, 0xAC
+                0xE3, 0x40, 0xC2, 0x5E, 0x5E, 0x04, 0x31, 0xB4, 0xAD, 0x2E, 0x75, 0xCC, 0x93, 0x04,
+                0x22, 0x00
             ],
         );
 

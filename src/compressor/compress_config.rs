@@ -16,10 +16,9 @@ pub struct CompressConfig {
 
 impl CompressConfig {
     pub fn create_model(&self) -> Result<Box<dyn Model>> {
-        let hash_table = 
-            Rc::new(
-                RefCell::new(HashTable::<NOrderByteData>::new(self.static_model_params.hash_table_pow2_size))
-            );
+        let hash_table = Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(
+            self.static_model_params.hash_table_pow2_size,
+        )));
         self.model
             .create_model(hash_table, &self.static_model_params)
     }
@@ -35,9 +34,9 @@ pub struct StaticModelParams {
 
 impl Default for StaticModelParams {
     fn default() -> Self {
-        Self { 
-            hash_table_pow2_size: default_hash_table_pow2_size(), 
-            mixer: Default::default() 
+        Self {
+            hash_table_pow2_size: default_hash_table_pow2_size(),
+            mixer: Default::default(),
         }
     }
 }
@@ -55,10 +54,10 @@ pub struct MixerModelParams {
 
 impl Default for MixerModelParams {
     fn default() -> Self {
-        Self { 
-            learning_rate: default_learning_rate(), 
-            context_learning_rate: default_context_learning_rate(), 
-            context_fixed_weight: default_context_fixed_weight() 
+        Self {
+            learning_rate: default_learning_rate(),
+            context_learning_rate: default_context_learning_rate(),
+            context_fixed_weight: default_context_fixed_weight(),
         }
     }
 }

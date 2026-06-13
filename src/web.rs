@@ -1,9 +1,7 @@
 use std::{
-    cell::RefCell,
     fs::File,
     io::Read,
     path::{Path, PathBuf},
-    rc::Rc,
 };
 
 use anyhow::{Context, Result};
@@ -11,11 +9,7 @@ use anyhow::{Context, Result};
 pub mod output_generator;
 
 use crate::{
-    compressor::{
-        model::{HashTable, NOrderByteData},
-        model_finder::create_default_compress_config,
-        Encoder,
-    },
+    compressor::{model_finder::create_default_compress_config, Encoder},
     report::ReportGenerator,
 };
 use output_generator::{render_output, BundledFile, OutputGenerationOptions};

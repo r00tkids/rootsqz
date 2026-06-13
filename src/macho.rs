@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fs, path::PathBuf, rc::Rc};
+use std::{fs, path::PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -13,10 +13,7 @@ mod payload;
 #[cfg(test)]
 mod tests;
 
-use crate::compressor::{
-    model::{HashTable, NOrderByteData},
-    model_finder::create_default_compress_config,
-};
+use crate::compressor::model_finder::create_default_compress_config;
 
 const DEFAULT_NORDER_TABLE_POW2: u32 = 26;
 

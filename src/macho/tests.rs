@@ -63,8 +63,7 @@ fn bootstrap_round_trips_compressed_macho_segments() {
     let link_output = Command::new("clang")
         .arg("-arch")
         .arg("arm64")
-        .arg("src/macho/stubs/bootstrap.s")
-        .arg("src/macho/stubs/decoder.s")
+        .arg("src/macho/stubs/stubs.s")
         .arg(&payload_path)
         .arg(&harness_path)
         .arg("-o")
@@ -211,7 +210,7 @@ fn packed_macho_metadata_for_helloworld() {
         .expect("Failed to pack Mach-O fixture");
 
     assert_eq!(packed.image_size, 0x8000);
-    assert_eq!(packed.entry_offset, 0x410);
+    assert_eq!(packed.entry_offset, 0x400);
     assert_eq!(packed.uncompressed.len(), 0x8000);
 
     assert_eq!(packed.segments.len(), 2);
@@ -219,7 +218,7 @@ fn packed_macho_metadata_for_helloworld() {
     assert_eq!(packed.segments[0].offset, 0);
     assert_eq!(packed.segments[0].vm_size, 0x4000);
     assert_eq!(packed.segments[0].init_prot, 5);
-    assert_eq!(packed.segments[1].name, "__DATA_CONST");
+    assert_eq!(packed.segments[1].name, "__DATA");
     assert_eq!(packed.segments[1].offset, 0x4000);
     assert_eq!(packed.segments[1].vm_size, 0x4000);
 
@@ -314,12 +313,7 @@ fn run_assembly_model_round_trip(
     let link_output = Command::new("clang")
         .arg("-arch")
         .arg("arm64")
-        .arg("src/macho/stubs/bootstrap.s")
-        .arg("src/macho/stubs/decoder.s")
-        .arg("src/macho/stubs/model_support.s")
-        .arg("src/macho/stubs/norder_byte.s")
-        .arg("src/macho/stubs/word.s")
-        .arg("src/macho/stubs/ln_mixer.s")
+        .arg("src/macho/stubs/stubs.s")
         .arg(&payload_path)
         .arg(&model_path)
         .arg(&harness_path)

@@ -1,4 +1,4 @@
-use crate::compressor::compress_config::{CompressConfig, MixerModelParams, StaticModelParams};
+use crate::compressor::compress_config::{CompressConfig, StaticModelParams};
 
 use super::compress_config::ModelConfig;
 
@@ -41,6 +41,6 @@ pub fn create_default_model_config() -> ModelConfig {
 pub fn create_default_compress_config() -> CompressConfig {
     CompressConfig {
         model: create_default_model_config(),
-        static_model_params: StaticModelParams::default()
+        static_model_params: StaticModelParams::default(),
     }
 }

@@ -15,8 +15,8 @@ mod tests {
     use super::coder::tests::ArithmeticDecoder;
     use super::model::Model;
     use super::utils::prob_squash;
-    use crate::compressor::Encoder;
     use crate::compressor::model_finder::create_default_compress_config;
+    use crate::compressor::Encoder;
     use anyhow::Result;
 
     #[cfg(test)]
