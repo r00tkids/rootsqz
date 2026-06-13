@@ -117,7 +117,8 @@ _rootsqz_model_learn:
 
         self.src.push_str(".section __DATA,__data\n.p2align 3\n");
         if ctx_symbol.starts_with('_') {
-            self.src.push_str(&format!(".private_extern {ctx_symbol}\n"));
+            self.src
+                .push_str(&format!(".private_extern {ctx_symbol}\n"));
         }
         self.src.push_str(&format!(
             r#"{ctx_symbol}:
@@ -172,7 +173,8 @@ _rootsqz_model_learn:
 
         self.src.push_str(".section __DATA,__data\n.p2align 3\n");
         if ctx_symbol.starts_with('_') {
-            self.src.push_str(&format!(".private_extern {ctx_symbol}\n"));
+            self.src
+                .push_str(&format!(".private_extern {ctx_symbol}\n"));
         }
         self.src.push_str(&format!(
             r#"{ctx_symbol}:

@@ -14,9 +14,9 @@ mod tests {
 
     use super::coder::tests::ArithmeticDecoder;
     use super::model::Model;
-    use super::model_finder::ModelFinder;
     use super::utils::prob_squash;
     use crate::compressor::Encoder;
+    use crate::compressor::model_finder::create_default_compress_config;
     use anyhow::Result;
 
     #[cfg(test)]
@@ -74,10 +74,10 @@ mod tests {
 
         let test_bytes = test_data.as_bytes();
 
-        let model_finder = ModelFinder::new();
+        let config = create_default_compress_config();
         let mut encoded_data: Vec<u8> = Vec::new();
         {
-            let model = model_finder.default_model;
+            let model = config.create_model().unwrap();
             let mut encoder = Encoder::new(model, &mut encoded_data).unwrap();
             encoder.warm_up(bootstrap_text.as_bytes()).unwrap();
             encoder.encode_section(test_bytes).unwrap();
@@ -90,8 +90,7 @@ mod tests {
             encoded_data.len()
         );
 
-        let model_finder = ModelFinder::new();
-        let model = model_finder.default_model;
+        let model = config.create_model().unwrap();
         let mut decoder = Decoder::new(model, encoded_data.as_slice()).unwrap();
 
         decoder.warm_up(bootstrap_text.as_bytes()).unwrap();

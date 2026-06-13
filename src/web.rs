@@ -13,7 +13,7 @@ pub mod output_generator;
 use crate::{
     compressor::{
         model::{HashTable, NOrderByteData},
-        model_finder::create_default_model_config,
+        model_finder::create_default_compress_config,
         Encoder,
     },
     report::ReportGenerator,
@@ -49,7 +49,7 @@ pub struct Args {
 }
 
 pub fn run(args: Args) -> Result<()> {
-    let model_config = create_default_model_config();
+    let model_config = create_default_compress_config();
 
     println!(
         "Starting compression (rootsqz v{})",
@@ -57,7 +57,7 @@ pub fn run(args: Args) -> Result<()> {
     );
     println!("Initializing hash table...");
     let model = model_config
-        .create_model(Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(26))))
+        .create_model()
         .context("Failed to create model from config")?;
 
     let mut main_js_bytes = Vec::new();
@@ -114,7 +114,7 @@ pub fn run(args: Args) -> Result<()> {
         OutputGenerationOptions {
             output_dir: Path::new(&args.output_directory).to_owned(),
             target: args.target,
-            model_config: model_config.clone(),
+            model_config: model_config.model.clone(),
         },
         size_before_compression,
         encoded_data,
@@ -127,7 +127,7 @@ pub fn run(args: Args) -> Result<()> {
     if args.report {
         println!("Generating compression report...");
         let model = model_config
-            .create_model(Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(26))))
+            .create_model()
             .context("Failed to create model from config")?;
 
         ReportGenerator::create(

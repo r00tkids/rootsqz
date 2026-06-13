@@ -51,6 +51,7 @@ mod node_tests {
     use std::process::Command;
     use std::{cell::RefCell, fs::File, io::Read, path::Path, rc::Rc};
 
+    use crate::compressor::model_finder::create_default_compress_config;
     use crate::compressor::{
         compress_config::CompressConfig,
         model::{HashTable, NOrderByteData},
@@ -68,10 +69,8 @@ mod node_tests {
         )
         .expect("Failed to parse tests/compress.json");
 
-        let hash_table = HashTable::<NOrderByteData>::new(26);
         let model = model_config
-            .model
-            .create_model(Rc::new(RefCell::new(hash_table)))
+            .create_model()
             .expect("Failed to create model from config");
 
         let mut input = String::new();
@@ -128,10 +127,8 @@ mod node_tests {
         )
         .expect("Failed to parse tests/compress.json");
 
-        let hash_table = HashTable::<NOrderByteData>::new(26);
         let model = model_config
-            .model
-            .create_model(Rc::new(RefCell::new(hash_table)))
+            .create_model()
             .expect("Failed to create model from config");
 
         let mut input = String::new();
@@ -172,11 +169,10 @@ mod node_tests {
         use rand::rngs::StdRng;
         use rand::{Rng, SeedableRng};
 
-        let model_config = create_default_model_config();
+        let model_config = create_default_compress_config();
 
-        let hash_table = HashTable::<NOrderByteData>::new(26);
         let model = model_config
-            .create_model(Rc::new(RefCell::new(hash_table)))
+            .create_model()
             .expect("Failed to create model from config");
 
         let mut rng = StdRng::seed_from_u64(1337);
@@ -192,7 +188,7 @@ mod node_tests {
             OutputGenerationOptions {
                 output_dir: Path::new("testout/round_trip_rand").to_owned(),
                 target: output_generator::Target::Node,
-                model_config: model_config,
+                model_config: model_config.model,
             },
             input_bytes.len(),
             encoded_data,

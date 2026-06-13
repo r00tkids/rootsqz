@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 
 make -C tests/macho
 mkdir -p testout
-cargo run macho -i tests/macho/helloworld -o testout/
-wc -c testout/decompressor
-wc -c testout/decompressor.sh
+rm -rf testout/macho
+cargo run macho -i tests/macho/helloworld -o testout/macho
+wc -c testout/macho/decompressor
+wc -c testout/macho/decompressor.sh
