@@ -4,7 +4,7 @@ use std::{
     path::Path,
 };
 
-use crate::{model::Model, utils::prob_squash};
+use crate::compressor::{model::Model, utils::prob_squash};
 use anyhow::Result;
 
 pub struct ReportGenerator {}

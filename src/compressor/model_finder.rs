@@ -1,27 +1,6 @@
-use std::{cell::RefCell, rc::Rc};
+use crate::compressor::compress_config::{CompressConfig, StaticModelParams};
 
-use crate::{
-    compress_config::ModelConfig,
-    model::{HashTable, Model, NOrderByteData},
-};
-
-#[allow(dead_code)]
-pub struct ModelFinder {
-    pub default_model: Box<dyn Model>,
-}
-
-impl ModelFinder {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        let model = Box::new(create_default_model_config());
-
-        Self {
-            default_model: model
-                .create_model(Rc::new(RefCell::new(HashTable::<NOrderByteData>::new(26))))
-                .unwrap(),
-        }
-    }
-}
+use super::compress_config::ModelConfig;
 
 pub fn create_default_model_config() -> ModelConfig {
     let mut byte_masks = Vec::new();
@@ -56,5 +35,12 @@ pub fn create_default_model_config() -> ModelConfig {
 
     ModelConfig::Mixer {
         models: mixed_models.clone(),
+    }
+}
+
+pub fn create_default_compress_config() -> CompressConfig {
+    CompressConfig {
+        model: create_default_model_config(),
+        static_model_params: StaticModelParams::default(),
     }
 }

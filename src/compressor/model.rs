@@ -1,4 +1,4 @@
-use crate::utils::{prob_squash, prob_stretch, U24_MAX};
+use super::utils::{prob_squash, prob_stretch, U24_MAX};
 use std::{
     cell::RefCell,
     ops::{Index, IndexMut},
@@ -115,7 +115,7 @@ impl NOrderByte {
             ctx: 0,
             bit_ctx: 1,
             magic_num: hash(byte_mask as u32, 2),
-            max_count: 15,
+            max_count: max_count,
             hash_table: hash_table,
             prev_bytes: 0,
             mask: bit_mask,
@@ -125,13 +125,13 @@ impl NOrderByte {
 
     pub fn new_word_model(
         hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
-        _max_count: u32,
+        max_count: u32,
     ) -> Self {
         Self {
             ctx: 0,
             bit_ctx: 1,
             magic_num: hash(1337 as u32, 2),
-            max_count: 15,
+            max_count: max_count,
             hash_table: hash_table,
             prev_bytes: 2166136261,
             mask: u64::MAX,
@@ -243,8 +243,10 @@ impl Model for LnMixerPred {
         let mut i = 0;
         for model in &mut self.models_with_weight {
             let model_weight = if weights.is_empty() {
+                // We don't have 1-order weight so just use the context independent weight
                 model.weight
             } else {
+                // Mix in 1-order weight with context independent weight
                 f64::mul_add(weights[i], 0.3, model.weight)
             };
 

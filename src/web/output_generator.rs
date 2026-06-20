@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::compress_config::ModelConfig;
+use crate::compressor::compress_config::ModelConfig;
 use anyhow::{anyhow, Context, Result};
 use bitflags::bitflags;
 use clap::ValueEnum;
