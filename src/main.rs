@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use human_panic::{setup_panic, Metadata};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -14,7 +14,7 @@ struct Cli {
     command: Option<Commands>,
 
     #[command(flatten)]
-    default_args: web::Args
+    default_args: web::Args,
 }
 
 #[derive(Subcommand, Debug)]
@@ -36,12 +36,11 @@ fn main() -> Result<()> {
 
     let args = Cli::parse();
 
-    let command = args.command.unwrap_or_else(|| Commands::Web(args.default_args));
+    let command = args
+        .command
+        .unwrap_or_else(|| Commands::Web(args.default_args));
     match command {
         Commands::Web(web_args) => web::run(web_args),
-        _ => {
-            bail!("No command specified. Use --help for usage information.");
-        }
     }
 }
 
@@ -52,10 +51,7 @@ mod node_tests {
     use std::{fs::File, io::Read, path::Path};
 
     use crate::compressor::model_finder::create_default_compress_config;
-    use crate::compressor::{
-        compress_config::CompressConfig,
-        Encoder,
-    };
+    use crate::compressor::{compress_config::CompressConfig, Encoder};
     use crate::web::output_generator::{
         self, render_output, FileWithContent, OutputGenerationOptions,
     };
