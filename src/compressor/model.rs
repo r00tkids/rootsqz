@@ -319,6 +319,8 @@ pub struct AdaptiveProbabilityMap {
     max_count: u32,
 
     current_prob_idx: usize,
+    next_prob_idx: usize,
+    current_prob_weight: f64,
 
     prev_bytes: u64,
     mask: u64,
@@ -335,6 +337,8 @@ impl AdaptiveProbabilityMap {
             hash_table: HashTable::<SSEPredData>::new(pow2_size),
             max_count: 255,
             current_prob_idx: 0,
+            next_prob_idx: 0,
+            current_prob_weight: 1.,
 
             prev_bytes: 0,
             mask: 0xffffff,
@@ -343,39 +347,49 @@ impl AdaptiveProbabilityMap {
             input_model: input_model,
         }
     }
+
+    fn update_counter(inst: &mut NOrderByteData, bit: u8, max_count: u32, weight: f64) {
+        if weight <= 0. {
+            return;
+        }
+
+        let (mut count, mut prob) = (inst.count(), inst.prob());
+        if count < max_count {
+            count += 1;
+        }
+
+        // Learning function
+        prob += (U24_MAX as f64
+            * weight
+            * ((bit as f64 - (prob as f64 / U24_MAX as f64)) / ((count + 30) as f64 + 1.5)))
+            as i32;
+        inst.set_count(count);
+        inst.set_prob(prob);
+    }
 }
 
 impl Model for AdaptiveProbabilityMap {
     fn pred(&mut self) -> f64 {
         let p = self.input_model.pred();
-        // TODO: Interpolate probabilities
         let p_ptr = p.max(-8.).min(7.5) * 2.;
         let p_idx_f = p_ptr.floor();
         let p_idx_c = p_ptr.ceil();
 
         let delta_f = p_ptr - p_idx_f;
         let delta_c = p_idx_c - p_ptr;
-        let t;
-        let mut next_idx;
         if delta_f <= delta_c {
             // Use floor
             self.current_prob_idx = (p_idx_f as i32 + 16) as usize;
-            next_idx = self.current_prob_idx + 1;
-            if next_idx >= 32 {
-                next_idx = 31;
+            self.next_prob_idx = self.current_prob_idx + 1;
+            if self.next_prob_idx >= 32 {
+                self.next_prob_idx = 31;
             }
-            t = 1. - delta_f;
+            self.current_prob_weight = 1. - delta_f;
         } else {
             // Use ceil
             self.current_prob_idx = (p_idx_c as i32 + 16) as usize;
-            next_idx = self.current_prob_idx - 1;
-            t = 1. - delta_c;
-        }
-        if next_idx >= 32 {
-            println!(
-                "Warning: next_idx is out of bounds: {}, {}, {}, {}, {}",
-                next_idx, self.current_prob_idx, t, p, p_ptr
-            );
+            self.next_prob_idx = self.current_prob_idx - 1;
+            self.current_prob_weight = 1. - delta_c;
         }
 
         let counter1 = {
@@ -390,7 +404,7 @@ impl Model for AdaptiveProbabilityMap {
 
         let counter2 = {
             let counter2: &mut NOrderByteData =
-                &mut self.hash_table.get_mut(self.ctx ^ self.bit_ctx)[next_idx];
+                &mut self.hash_table.get_mut(self.ctx ^ self.bit_ctx)[self.next_prob_idx];
             if counter2.count() == 0 {
                 let prob = (prob_squash(p) * U24_MAX as f64) as i32 & U24_MAX as i32;
                 counter2.set_prob(prob);
@@ -398,27 +412,28 @@ impl Model for AdaptiveProbabilityMap {
             counter2.clone()
         };
 
-        let new_p = t * (counter1.prob() as f64 / U24_MAX as f64)
-            + (1. - t) * (counter2.prob() as f64 / U24_MAX as f64);
+        let new_p = self.current_prob_weight * (counter1.prob() as f64 / U24_MAX as f64)
+            + (1. - self.current_prob_weight) * (counter2.prob() as f64 / U24_MAX as f64);
         prob_stretch(new_p)
     }
 
     fn learn(&mut self, bit: u8) {
         {
-            let inst = &mut self.hash_table.get_mut(self.ctx ^ self.bit_ctx)
-                [self.current_prob_idx as usize];
-
-            let (mut count, mut prob) = (inst.count(), inst.prob());
-            if count < self.max_count {
-                count += 1;
+            let counters = self.hash_table.get_mut(self.ctx ^ self.bit_ctx);
+            Self::update_counter(
+                &mut counters[self.current_prob_idx],
+                bit,
+                self.max_count,
+                self.current_prob_weight,
+            );
+            if self.next_prob_idx != self.current_prob_idx {
+                Self::update_counter(
+                    &mut counters[self.next_prob_idx],
+                    bit,
+                    self.max_count,
+                    1. - self.current_prob_weight,
+                );
             }
-
-            // Learning function
-            prob += (U24_MAX as f64
-                * ((bit as f64 - (prob as f64 / U24_MAX as f64)) / ((count + 30) as f64 + 1.5)))
-                as i32;
-            inst.set_count(count);
-            inst.set_prob(prob);
         }
 
         self.bit_ctx = (self.bit_ctx << 1) | bit as u32;
