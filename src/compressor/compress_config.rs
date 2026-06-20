@@ -48,8 +48,8 @@ pub struct MixerModelParams {
     pub learning_rate: f64,
     #[serde(default = "default_context_learning_rate")]
     pub context_learning_rate: f64,
-    #[serde(default = "default_context_fixed_weight")]
-    pub context_fixed_weight: f64,
+    #[serde(default = "default_context_weight_scale")]
+    pub context_weight_scale: f64,
 }
 
 impl Default for MixerModelParams {
@@ -57,7 +57,7 @@ impl Default for MixerModelParams {
         Self {
             learning_rate: default_learning_rate(),
             context_learning_rate: default_context_learning_rate(),
-            context_fixed_weight: default_context_fixed_weight(),
+            context_weight_scale: default_context_weight_scale(),
         }
     }
 }
@@ -74,7 +74,7 @@ fn default_context_learning_rate() -> f64 {
     0.022
 }
 
-fn default_context_fixed_weight() -> f64 {
+fn default_context_weight_scale() -> f64 {
     0.3
 }
 
@@ -103,6 +103,9 @@ impl ModelConfig {
                     .iter()
                     .map(|config| config.create_model(hash_table.clone(), static_model_params))
                     .collect::<Result<Vec<_>>>()?,
+                static_model_params.mixer.learning_rate,
+                static_model_params.mixer.context_learning_rate,
+                static_model_params.mixer.context_weight_scale,
             )),
             ModelConfig::AdaptiveProbabilityMap(model_config) => {
                 Box::new(AdaptiveProbabilityMap::new(

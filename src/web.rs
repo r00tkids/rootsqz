@@ -109,6 +109,7 @@ pub fn run(args: Args) -> Result<()> {
             output_dir: Path::new(&args.output_directory).to_owned(),
             target: args.target,
             model_config: model_config.model.clone(),
+            static_model_params: model_config.static_model_params.clone(),
         },
         size_before_compression,
         encoded_data,

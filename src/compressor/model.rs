@@ -211,10 +211,18 @@ pub struct LnMixerPred {
     prev_byte: u32,
     bit_ctx: u32,
     last_total_p: f64,
+    learning_rate: f64,
+    context_learning_rate: f64,
+    context_weight_scale: f64,
 }
 
 impl LnMixerPred {
-    pub fn new(models: Vec<Box<dyn Model>>) -> Self {
+    pub fn new(
+        models: Vec<Box<dyn Model>>,
+        learning_rate: f64,
+        context_learning_rate: f64,
+        context_weight_scale: f64,
+    ) -> Self {
         let num_models = models.len();
         let mut models_with_weight = Vec::new();
         for model in models {
@@ -231,6 +239,9 @@ impl LnMixerPred {
             weights: vec![vec![vec![]; 255]; 256],
             bit_ctx: 1,
             prev_byte: 0,
+            learning_rate,
+            context_learning_rate,
+            context_weight_scale,
         }
     }
 }
@@ -247,7 +258,7 @@ impl Model for LnMixerPred {
                 model.weight
             } else {
                 // Mix in 1-order weight with context independent weight
-                f64::mul_add(weights[i], 0.3, model.weight)
+                f64::mul_add(weights[i], self.context_weight_scale, model.weight)
             };
 
             let p = model.model.pred();
@@ -273,15 +284,13 @@ impl Model for LnMixerPred {
 
         let pred_err = bit as f64 - self.last_total_p;
 
-        const LEARNING_RATE: f64 = 0.0004;
-        const LEARNING_RATE_CTX: f64 = 0.022;
         let mut i = 0;
         for model in &mut self.models_with_weight {
             model.model.learn(bit);
             let p = self.last_p[i];
 
-            model.weight += LEARNING_RATE * pred_err * p;
-            weights[i] += LEARNING_RATE_CTX * pred_err * p;
+            model.weight += self.learning_rate * pred_err * p;
+            weights[i] += self.context_learning_rate * pred_err * p;
 
             i += 1;
         }

@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::compressor::compress_config::ModelConfig;
+use crate::compressor::compress_config::{ModelConfig, StaticModelParams};
 use anyhow::{anyhow, Context, Result};
 use bitflags::bitflags;
 use clap::ValueEnum;
@@ -18,6 +18,7 @@ pub struct OutputGenerationOptions {
     pub output_dir: PathBuf,
     pub target: Target,
     pub model_config: ModelConfig,
+    pub static_model_params: StaticModelParams,
 }
 
 bitflags! {
@@ -35,11 +36,12 @@ bitflags! {
 
 pub fn generate_js_decompression_code(
     model_config: &ModelConfig,
+    static_model_params: &StaticModelParams,
     features_used: &mut ModelRef,
 ) -> String {
     let mut static_src: String = "".to_owned();
     let mut out_src = "let model = ".to_owned();
-    out_src += generate_js_ctors(model_config, features_used).as_str();
+    out_src += generate_js_ctors(model_config, static_model_params, features_used).as_str();
 
     out_src += ";\n";
 
@@ -62,7 +64,11 @@ pub fn generate_js_decompression_code(
     static_src + "\n" + out_src.as_str()
 }
 
-fn generate_js_ctors(model_config: &ModelConfig, features_used: &mut ModelRef) -> String {
+fn generate_js_ctors(
+    model_config: &ModelConfig,
+    static_model_params: &StaticModelParams,
+    features_used: &mut ModelRef,
+) -> String {
     match model_config {
         ModelConfig::NOrderByte { byte_mask } => {
             *features_used |= ModelRef::NOrderByte;
@@ -73,19 +79,53 @@ fn generate_js_ctors(model_config: &ModelConfig, features_used: &mut ModelRef) -
             *features_used |= ModelRef::Mixer;
             let models_js: Vec<String> = models
                 .into_iter()
-                .map(|c| generate_js_ctors(c, features_used))
+                .map(|c| generate_js_ctors(c, static_model_params, features_used))
                 .collect();
-            format!("LnMixerPred([{}])", models_js.join(", "))
+            format!(
+                "LnMixerPred([{}], {}, {}, {})",
+                models_js.join(", "),
+                static_model_params.mixer.learning_rate,
+                static_model_params.mixer.context_learning_rate,
+                static_model_params.mixer.context_weight_scale
+            )
         }
         ModelConfig::AdaptiveProbabilityMap(model_config) => {
             *features_used |= ModelRef::AdaptiveProbabilityMap;
-            let inner_js = generate_js_ctors(model_config, features_used);
+            let inner_js = generate_js_ctors(model_config, static_model_params, features_used);
             format!("AdaptiveProbabilityMap(19, {})", inner_js)
         }
         ModelConfig::Word => {
             *features_used |= ModelRef::Word;
             "NOrderByte(0, 1)".to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compressor::compress_config::MixerModelParams;
+
+    #[test]
+    fn mixer_params_are_emitted_to_js_constructor() {
+        let mut static_model_params = StaticModelParams::default();
+        static_model_params.mixer = MixerModelParams {
+            learning_rate: 0.001,
+            context_learning_rate: 0.02,
+            context_weight_scale: 0.4,
+        };
+
+        let model_config = ModelConfig::Mixer {
+            models: vec![ModelConfig::NOrderByte {
+                byte_mask: "0b00000000".to_string(),
+            }],
+        };
+        let mut features_used = ModelRef::None;
+
+        let js =
+            generate_js_decompression_code(&model_config, &static_model_params, &mut features_used);
+
+        assert!(js.contains("LnMixerPred([NOrderByte(0b00000000, 0)], 0.001, 0.02, 0.4)"));
     }
 }
 
@@ -120,12 +160,14 @@ pub fn render_output(
         output_dir,
         target,
         model_config,
+        static_model_params,
     } = output_options;
 
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
     let mut features_used = ModelRef::None;
-    let decompression_code = generate_js_decompression_code(&model_config, &mut features_used);
+    let decompression_code =
+        generate_js_decompression_code(&model_config, &static_model_params, &mut features_used);
 
     Ok(match target {
         Target::Web => {

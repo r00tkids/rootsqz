@@ -1,4 +1,4 @@
-let LnMixerPred = (models) => {
+let LnMixerPred = (models, learningRate = 0.0004, contextLearningRate = 0.022, contextWeightScale = 0.3) => {
     models = models.map(model => ({
         model: model,
         weight: 1 / models.length
@@ -14,15 +14,12 @@ let LnMixerPred = (models) => {
     let bitCtx = 1;
     let ctx = 0;
 
-    let LEARNING_RATE = 0.0004;
-    let LEARNING_RATE_CTX = 0.022;
-
     return {
         pred: () => {
             let sum = 0;
             let weightsForCtx = weights[ctx][bitCtx - 1];
             for (let i = 0;i < models.length;++i) {
-                let weight = weightsForCtx ? weightsForCtx[i] * 0.3 + models[i].weight : models[i].weight;
+                let weight = weightsForCtx ? weightsForCtx[i] * contextWeightScale + models[i].weight : models[i].weight;
 
                 let p = models[i].model.pred();
                 lastP[i] = p;
@@ -44,8 +41,8 @@ let LnMixerPred = (models) => {
             let predErr = bit - lastTotalP;
             for (let i = 0;i < models.length;++i) {
                 models[i].model.learn(bit);
-                models[i].weight += LEARNING_RATE * predErr * lastP[i];
-                weightsForCtx[i] += LEARNING_RATE_CTX * predErr * lastP[i];
+                models[i].weight += learningRate * predErr * lastP[i];
+                weightsForCtx[i] += contextLearningRate * predErr * lastP[i];
             }
 
             bitCtx = (bitCtx << 1) | bit;

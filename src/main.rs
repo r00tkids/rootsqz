@@ -84,7 +84,8 @@ mod node_tests {
             OutputGenerationOptions {
                 output_dir: Path::new("testout/round_trip").to_owned(),
                 target: output_generator::Target::Node,
-                model_config: model_config.model,
+                model_config: model_config.model.clone(),
+                static_model_params: model_config.static_model_params.clone(),
             },
             input_bytes.len(),
             encoded_data,
@@ -144,7 +145,8 @@ mod node_tests {
             OutputGenerationOptions {
                 output_dir: Path::new("testout/web").to_owned(),
                 target: output_generator::Target::Web,
-                model_config: model_config.model,
+                model_config: model_config.model.clone(),
+                static_model_params: model_config.static_model_params.clone(),
             },
             input_bytes.len(),
             encoded_data,
@@ -182,7 +184,8 @@ mod node_tests {
             OutputGenerationOptions {
                 output_dir: Path::new("testout/round_trip_rand").to_owned(),
                 target: output_generator::Target::Node,
-                model_config: model_config.model,
+                model_config: model_config.model.clone(),
+                static_model_params: model_config.static_model_params.clone(),
             },
             input_bytes.len(),
             encoded_data,
