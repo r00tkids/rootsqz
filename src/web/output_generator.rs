@@ -70,10 +70,16 @@ fn generate_js_ctors(
     features_used: &mut ModelRef,
 ) -> String {
     match model_config {
-        ModelConfig::NOrderByte { byte_mask } => {
+        ModelConfig::NOrderByte {
+            byte_mask,
+            max_count,
+        } => {
             *features_used |= ModelRef::NOrderByte;
             *features_used |= ModelRef::HashTable;
-            format!("NOrderByte({}, 0)", byte_mask)
+            match max_count {
+                Some(max_count) => format!("NOrderByte({}, 0, {})", byte_mask, max_count),
+                None => format!("NOrderByte({}, 0)", byte_mask),
+            }
         }
         ModelConfig::Mixer { models } => {
             *features_used |= ModelRef::Mixer;
@@ -96,7 +102,7 @@ fn generate_js_ctors(
         }
         ModelConfig::Word => {
             *features_used |= ModelRef::Word;
-            "NOrderByte(0, 1)".to_string()
+            format!("NOrderByte(0, 1, {})", static_model_params.word_max_count)
         }
     }
 }
@@ -118,6 +124,7 @@ mod tests {
         let model_config = ModelConfig::Mixer {
             models: vec![ModelConfig::NOrderByte {
                 byte_mask: "0b00000000".to_string(),
+                max_count: None,
             }],
         };
         let mut features_used = ModelRef::None;
@@ -126,6 +133,32 @@ mod tests {
             generate_js_decompression_code(&model_config, &static_model_params, &mut features_used);
 
         assert!(js.contains("LnMixerPred([NOrderByte(0b00000000, 0)], 0.001, 0.02, 0.4)"));
+    }
+
+    #[test]
+    fn word_count_is_emitted_to_js_constructor() {
+        let mut params = StaticModelParams::default();
+        params.word_max_count = 2;
+        let mut features_used = ModelRef::None;
+
+        let js = generate_js_decompression_code(&ModelConfig::Word, &params, &mut features_used);
+
+        assert!(js.contains("NOrderByte(0, 1, 2)"));
+    }
+
+    #[test]
+    fn byte_model_count_cap_is_emitted_to_js_constructor() {
+        let model_config = ModelConfig::NOrderByte {
+            byte_mask: "0b00000001".to_string(),
+            max_count: Some(3),
+        };
+        let mut features_used = ModelRef::None;
+        let js = generate_js_decompression_code(
+            &model_config,
+            &StaticModelParams::default(),
+            &mut features_used,
+        );
+        assert!(js.contains("let model = NOrderByte(0b00000001, 0, 3);"));
     }
 }
 

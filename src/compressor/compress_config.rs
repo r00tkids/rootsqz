@@ -29,6 +29,9 @@ impl CompressConfig {
 pub struct StaticModelParams {
     #[serde(default = "default_hash_table_pow2_size")]
     pub hash_table_pow2_size: u32,
+    #[serde(default = "default_word_max_count")]
+    pub word_max_count: u32,
+    #[serde(default)]
     pub mixer: MixerModelParams,
 }
 
@@ -36,6 +39,7 @@ impl Default for StaticModelParams {
     fn default() -> Self {
         Self {
             hash_table_pow2_size: default_hash_table_pow2_size(),
+            word_max_count: default_word_max_count(),
             mixer: Default::default(),
         }
     }
@@ -66,6 +70,10 @@ fn default_hash_table_pow2_size() -> u32 {
     26
 }
 
+fn default_word_max_count() -> u32 {
+    15
+}
+
 fn default_learning_rate() -> f64 {
     0.0004
 }
@@ -81,8 +89,14 @@ fn default_context_weight_scale() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ModelConfig {
-    NOrderByte { byte_mask: String },
-    Mixer { models: Vec<ModelConfig> },
+    NOrderByte {
+        byte_mask: String,
+        #[serde(default)]
+        max_count: Option<u32>,
+    },
+    Mixer {
+        models: Vec<ModelConfig>,
+    },
     AdaptiveProbabilityMap(Box<ModelConfig>),
     Word,
 }
@@ -94,9 +108,16 @@ impl ModelConfig {
         static_model_params: &StaticModelParams,
     ) -> Result<Box<dyn Model>> {
         Ok(match self {
-            ModelConfig::NOrderByte { byte_mask } => {
+            ModelConfig::NOrderByte {
+                byte_mask,
+                max_count,
+            } => {
                 let byte_mask = u8::from_str_radix(byte_mask.trim_start_matches("0b"), 2)?;
-                Box::new(NOrderByte::new_norder_model(byte_mask, hash_table, 15))
+                Box::new(NOrderByte::new_norder_model(
+                    byte_mask,
+                    hash_table,
+                    max_count.unwrap_or(15),
+                ))
             }
             ModelConfig::Mixer { models } => Box::new(LnMixerPred::new(
                 models
@@ -113,7 +134,10 @@ impl ModelConfig {
                     model_config.create_model(hash_table.clone(), static_model_params)?,
                 ))
             }
-            ModelConfig::Word => Box::new(NOrderByte::new_word_model(hash_table, 15)),
+            ModelConfig::Word => Box::new(NOrderByte::new_word_model(
+                hash_table,
+                static_model_params.word_max_count,
+            )),
         })
     }
 }

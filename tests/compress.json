@@ -1,4 +1,12 @@
 {
+    "static_model_params": {
+        "word_max_count": 2,
+        "mixer": {
+            "learning_rate": 0.001,
+            "context_learning_rate": 0.044,
+            "context_weight_scale": 0.2
+        }
+    },
     "model": {
         "type": "Mixer",
         "models": [
@@ -24,31 +32,16 @@
             },
             {
                 "type": "NOrderByte",
-                "byte_mask": "0b00011111"
-            },
-            {
-                "type": "NOrderByte",
-                "byte_mask": "0b00111111"
-            },
-            {
-                "type": "NOrderByte",
-                "byte_mask": "0b01111111"
-            },
-            {
-                "type": "NOrderByte",
                 "byte_mask": "0b11111111"
             },
             {
                 "type": "NOrderByte",
-                "byte_mask": "0b00000010"
+                "byte_mask": "0b00010101"
             },
             {
                 "type": "NOrderByte",
-                "byte_mask": "0b00000110"
-            },
-            {
-                "type": "NOrderByte",
-                "byte_mask": "0b00001110"
+                "byte_mask": "0b00000010",
+                "max_count": 4
             },
             {
                 "type": "NOrderByte",
@@ -56,19 +49,11 @@
             },
             {
                 "type": "NOrderByte",
-                "byte_mask": "0b00000100"
-            },
-            {
-                "type": "NOrderByte",
-                "byte_mask": "0b00001100"
-            },
-            {
-                "type": "NOrderByte",
-                "byte_mask": "0b00011100"
-            },
-            {
-                "type": "NOrderByte",
                 "byte_mask": "0b00111100"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00001011"
             },
             {
                 "type": "Word"

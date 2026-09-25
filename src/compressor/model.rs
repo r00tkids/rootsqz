@@ -176,7 +176,7 @@ impl Model for NOrderByte {
 
             if self.is_word_model {
                 let next_char = current_byte as u8 as char;
-                if next_char.is_ascii_alphanumeric() {
+                if next_char.is_ascii_alphanumeric() || matches!(next_char, '_' | '.' | '[' | ']') {
                     self.prev_bytes = self.prev_bytes ^ next_char.to_ascii_lowercase() as u64;
                     self.prev_bytes = self.prev_bytes.wrapping_mul(16777619) >> 16;
                 } else {

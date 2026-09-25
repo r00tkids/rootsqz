@@ -9,9 +9,8 @@ let NOrderByteHashMap = HashMap(26, 4, { prob: U24Max >> 1, count: 0 }, (view, v
     };
 });
 
-let NOrderByte = (byteMask, isWord) => {
+let NOrderByte = (byteMask, isWord, maxCount = 15) => {
     let ctx = 0;
-    let maxCount = 15;
     let bitMask = 0n;
     let bitCtx = 1;
     let prevBytes = isWord ? 2166136261n : 0n;
@@ -41,7 +40,7 @@ let NOrderByte = (byteMask, isWord) => {
 
                 if (isWord) {
                     let nextChar = currentByte;
-                    if ((nextChar >= 65 && nextChar <= 90) || (nextChar >= 97 && nextChar <= 122) || (nextChar >= 48 && nextChar <= 57)) {
+                    if ((nextChar >= 65 && nextChar <= 90) || (nextChar >= 97 && nextChar <= 122) || (nextChar >= 48 && nextChar <= 57) || nextChar === 95 || nextChar === 46 || nextChar === 91 || nextChar === 93) {
                         // Make nextChar lowercase
                         if (nextChar >= 65 && nextChar <= 90)
                             nextChar ^= ASCII_CASE_MASK;

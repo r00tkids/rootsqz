@@ -28,6 +28,7 @@ pub fn create_default_model_config() -> ModelConfig {
         .into_iter()
         .map(|mask| ModelConfig::NOrderByte {
             byte_mask: format!("0b{:08b}", mask),
+            max_count: None,
         })
         .collect::<Vec<_>>();
 
