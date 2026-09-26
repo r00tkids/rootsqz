@@ -94,6 +94,11 @@ pub enum ModelConfig {
         #[serde(default)]
         max_count: Option<u32>,
     },
+    CharClass {
+        order: u8,
+        #[serde(default)]
+        max_count: Option<u32>,
+    },
     Mixer {
         models: Vec<ModelConfig>,
     },
@@ -115,6 +120,18 @@ impl ModelConfig {
                 let byte_mask = u8::from_str_radix(byte_mask.trim_start_matches("0b"), 2)?;
                 Box::new(NOrderByte::new_norder_model(
                     byte_mask,
+                    hash_table,
+                    max_count.unwrap_or(15),
+                ))
+            }
+            ModelConfig::CharClass { order, max_count } => {
+                anyhow::ensure!((1..=8).contains(order), "CharClass order must be 1..=8");
+                anyhow::ensure!(
+                    max_count.unwrap_or(15) <= 255,
+                    "CharClass max_count must be <= 255"
+                );
+                Box::new(NOrderByte::new_char_class_model(
+                    *order,
                     hash_table,
                     max_count.unwrap_or(15),
                 ))

@@ -1,0 +1,67 @@
+{
+    "static_model_params": {
+        "word_max_count": 2,
+        "mixer": {
+            "learning_rate": 0.001,
+            "context_learning_rate": 0.044,
+            "context_weight_scale": 0.2
+        }
+    },
+    "model": {
+        "type": "Mixer",
+        "models": [
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000000"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000001"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000011"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000111"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00001111"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b11111111"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00010101"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000010",
+                "max_count": 4
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00011110"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00111100"
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00001011"
+            },
+            {
+                "type": "Word"
+            },
+            {
+                "type": "CharClass",
+                "order": 7
+            }
+        ]
+    }
+}

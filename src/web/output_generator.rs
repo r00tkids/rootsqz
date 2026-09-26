@@ -31,6 +31,7 @@ bitflags! {
         const AdaptiveProbabilityMap = 0b00000100;
         const Word = 0b00001000;
         const HashTable = 0b00010000;
+        const CharClass = 0b00100000;
     }
 }
 
@@ -49,7 +50,9 @@ pub fn generate_js_decompression_code(
     static_src += include_str!("js_source/coder.js");
     static_src += include_str!("js_source/utils.js");
 
-    if *features_used & (ModelRef::NOrderByte | ModelRef::Word) != ModelRef::None {
+    if features_used.contains(ModelRef::CharClass) {
+        static_src += include_str!("js_source/norder_byte_class.js");
+    } else if *features_used & (ModelRef::NOrderByte | ModelRef::Word) != ModelRef::None {
         static_src += include_str!("js_source/norder_byte.js");
     }
 
@@ -80,6 +83,11 @@ fn generate_js_ctors(
                 Some(max_count) => format!("NOrderByte({}, 0, {})", byte_mask, max_count),
                 None => format!("NOrderByte({}, 0)", byte_mask),
             }
+        }
+        ModelConfig::CharClass { order, max_count } => {
+            *features_used |= ModelRef::CharClass;
+            *features_used |= ModelRef::HashTable;
+            format!("NOrderByte(0, 0, {}, {})", max_count.unwrap_or(15), order)
         }
         ModelConfig::Mixer { models } => {
             *features_used |= ModelRef::Mixer;

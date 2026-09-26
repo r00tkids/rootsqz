@@ -58,8 +58,20 @@ mod node_tests {
 
     #[test]
     pub fn round_trip() {
-        let model_config = create_default_compress_config();
+        round_trip_with_config(create_default_compress_config(), "testout/round_trip");
+    }
 
+    #[test]
+    pub fn char_class_round_trip() {
+        let config = serde_json::from_str(include_str!("compressor/char_class_config.json"))
+            .expect("Failed to parse character class config");
+        round_trip_with_config(config, "testout/char_class_round_trip");
+    }
+
+    fn round_trip_with_config(
+        model_config: crate::compressor::compress_config::CompressConfig,
+        output_dir: &str,
+    ) {
         let model = model_config
             .create_model()
             .expect("Failed to create model from config");
@@ -79,7 +91,7 @@ mod node_tests {
 
         render_output(
             OutputGenerationOptions {
-                output_dir: Path::new("testout/round_trip").to_owned(),
+                output_dir: Path::new(output_dir).to_owned(),
                 target: output_generator::Target::Node,
                 model_config: model_config.model.clone(),
                 static_model_params: model_config.static_model_params.clone(),
@@ -93,12 +105,12 @@ mod node_tests {
         .expect("Failed to render output");
 
         Command::new("node")
-            .arg("testout/round_trip/index.mjs")
+            .arg(Path::new(output_dir).join("index.mjs"))
             .status()
             .expect("Failed to run node decompressor");
 
-        let output_path = Path::new("testout/round_trip/output.bin");
-        let output_file = File::open(output_path).expect("Failed to open output.bin");
+        let output_file = File::open(Path::new(output_dir).join("output.bin"))
+            .expect("Failed to open output.bin");
         let mut output_data = Vec::new();
         output_file
             .take(usize::MAX as u64)

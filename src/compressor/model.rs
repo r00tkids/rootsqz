@@ -94,6 +94,7 @@ pub struct NOrderByte {
     prev_bytes: u64,
     mask: u64,
     is_word_model: bool,
+    class_order: u8,
 
     bit_ctx: u32,
 }
@@ -120,6 +121,7 @@ impl NOrderByte {
             prev_bytes: 0,
             mask: bit_mask,
             is_word_model: false,
+            class_order: 0,
         }
     }
 
@@ -136,7 +138,42 @@ impl NOrderByte {
             prev_bytes: 2166136261,
             mask: u64::MAX,
             is_word_model: true,
+            class_order: 0,
         }
+    }
+
+    pub fn new_char_class_model(
+        order: u8,
+        hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+        max_count: u32,
+    ) -> Self {
+        assert!((1..=8).contains(&order));
+        assert!(max_count <= 255);
+        Self {
+            ctx: 0,
+            bit_ctx: 1,
+            magic_num: hash(0x434c4153 ^ order as u32, 2),
+            max_count,
+            hash_table,
+            prev_bytes: 0,
+            mask: (1u64 << (order * 3)) - 1,
+            is_word_model: false,
+            class_order: order,
+        }
+    }
+}
+
+fn char_class(byte: u8) -> u8 {
+    match byte {
+        b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$' => 1,
+        b'0'..=b'9' => 2,
+        b' ' | b'\t' | b'\r' | b'\n' => 3,
+        b'\'' | b'"' | b'`' => 4,
+        b'(' | b'[' | b'{' => 5,
+        b')' | b']' | b'}' => 6,
+        b'.' | b',' | b':' | b';' | b'+' | b'-' | b'*' | b'=' | b'<' | b'>' | b'!' | b'&'
+        | b'|' | b'%' | b'^' | b'~' | b'?' | b'/' | b'\\' => 7,
+        _ => 0,
     }
 }
 
@@ -182,6 +219,8 @@ impl Model for NOrderByte {
                 } else {
                     self.prev_bytes = 2166136261;
                 }
+            } else if self.class_order != 0 {
+                self.prev_bytes = (self.prev_bytes << 3) | char_class(current_byte as u8) as u64;
             } else {
                 self.prev_bytes = (self.prev_bytes << 8) | current_byte as u64;
             }

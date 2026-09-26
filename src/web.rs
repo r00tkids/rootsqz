@@ -9,7 +9,9 @@ use anyhow::{Context, Result};
 pub mod output_generator;
 
 use crate::{
-    compressor::{model_finder::create_default_compress_config, Encoder},
+    compressor::{
+        compress_config::CompressConfig, model_finder::create_default_compress_config, Encoder,
+    },
     report::ReportGenerator,
 };
 use output_generator::{render_output, BundledFile, OutputGenerationOptions};
@@ -40,10 +42,21 @@ pub struct Args {
     /// If set, reports detailed compression statistics to websqz-report.html
     #[arg(short, long)]
     pub report: bool,
+
+    /// Compression model config JSON (uses the embedded default when omitted)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
 }
 
 pub fn run(args: Args) -> Result<()> {
-    let model_config = create_default_compress_config();
+    let model_config: CompressConfig = match &args.config {
+        Some(path) => serde_json::from_slice(
+            &std::fs::read(path)
+                .with_context(|| format!("Failed to read config: {}", path.display()))?,
+        )
+        .with_context(|| format!("Failed to parse config: {}", path.display()))?,
+        None => create_default_compress_config(),
+    };
 
     println!(
         "Starting compression (websqz v{})",
