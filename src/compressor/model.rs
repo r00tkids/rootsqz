@@ -238,6 +238,138 @@ impl Model for NOrderByte {
     }
 }
 
+/// Predicts bits from the position in a lexical token and the last delimiter.
+/// This state is independent of the Word model's rolling character hash.
+pub struct TokenPosition {
+    hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+    max_count: u32,
+    context_bytes: u8,
+    max_position: u8,
+    kind: u8,
+    position: u8,
+    delimiter: u8,
+    prev_bytes: u16,
+    escaped: bool,
+    bit_ctx: u32,
+    ctx: u32,
+}
+
+impl TokenPosition {
+    pub fn new(
+        hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+        max_count: u32,
+        context_bytes: u8,
+        max_position: u8,
+    ) -> Self {
+        assert!(max_count <= 255);
+        assert!(context_bytes <= 2);
+        assert!(max_position > 0);
+        Self {
+            hash_table,
+            max_count,
+            context_bytes,
+            max_position,
+            kind: 0,
+            position: 0,
+            delimiter: 0,
+            prev_bytes: 0,
+            escaped: false,
+            bit_ctx: 1,
+            ctx: 0,
+        }
+    }
+
+    fn advance(&mut self, byte: u8) {
+        if self.kind >= 3 {
+            let quote = match self.kind {
+                3 => b'\'',
+                4 => b'"',
+                _ => b'`',
+            };
+            if self.escaped {
+                self.escaped = false;
+                self.position = self.position.saturating_add(1).min(self.max_position);
+            } else if byte == b'\\' {
+                self.escaped = true;
+                self.position = self.position.saturating_add(1).min(self.max_position);
+            } else if byte == quote {
+                self.kind = 0;
+                self.position = 0;
+                self.delimiter = byte;
+            } else {
+                self.position = self.position.saturating_add(1).min(self.max_position);
+            }
+        } else if matches!(byte, b'\'' | b'"' | b'`') {
+            self.kind = match byte {
+                b'\'' => 3,
+                b'"' => 4,
+                _ => 5,
+            };
+            self.position = 0;
+        } else if byte.is_ascii_alphabetic()
+            || byte == b'_'
+            || byte == b'$'
+            || (self.kind == 1 && byte.is_ascii_digit())
+        {
+            self.position = if self.kind == 1 {
+                self.position.saturating_add(1).min(self.max_position)
+            } else {
+                1
+            };
+            self.kind = 1;
+        } else if byte.is_ascii_digit() {
+            self.position = if self.kind == 2 {
+                self.position.saturating_add(1).min(self.max_position)
+            } else {
+                1
+            };
+            self.kind = 2;
+        } else {
+            self.kind = 0;
+            self.position = 0;
+            if !byte.is_ascii_whitespace() {
+                self.delimiter = byte;
+            }
+        }
+        self.prev_bytes = (self.prev_bytes << 8) | byte as u16;
+        let recent = match self.context_bytes {
+            0 => 0,
+            1 => self.prev_bytes & 0xff,
+            _ => self.prev_bytes,
+        };
+        let state =
+            (self.kind as u32) | ((self.position as u32) << 3) | ((self.delimiter as u32) << 11);
+        self.ctx = hash(state ^ ((recent as u32) << 19) ^ 0x6b8b4567, 3).wrapping_mul(0x85ebca6b);
+    }
+}
+
+impl Model for TokenPosition {
+    fn pred(&mut self) -> f64 {
+        let entry = *self.hash_table.borrow().get(self.ctx ^ self.bit_ctx);
+        prob_stretch(entry.prob() as f64 / U24_MAX as f64)
+    }
+
+    fn learn(&mut self, bit: u8) {
+        {
+            let mut table = self.hash_table.borrow_mut();
+            let inst = table.get_mut(self.ctx ^ self.bit_ctx);
+            let count = (inst.count() + 1).min(self.max_count);
+            let mut prob = inst.prob();
+            prob += (U24_MAX as f64
+                * ((bit as f64 - prob as f64 / U24_MAX as f64) / (count as f64 + 0.2)))
+                as i32;
+            inst.set_count(count);
+            inst.set_prob(prob);
+        }
+        self.bit_ctx = (self.bit_ctx << 1) | bit as u32;
+        if self.bit_ctx >= 256 {
+            let byte = (self.bit_ctx & 255) as u8;
+            self.advance(byte);
+            self.bit_ctx = 1;
+        }
+    }
+}
+
 pub struct ModelWithWeight {
     pub model: Box<dyn Model>,
     pub weight: f64,

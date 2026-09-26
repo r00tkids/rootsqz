@@ -32,6 +32,7 @@ bitflags! {
         const Word = 0b00001000;
         const HashTable = 0b00010000;
         const CharClass = 0b00100000;
+        const TokenPosition = 0b01000000;
     }
 }
 
@@ -52,8 +53,14 @@ pub fn generate_js_decompression_code(
 
     if features_used.contains(ModelRef::CharClass) {
         static_src += include_str!("js_source/norder_byte_class.js");
-    } else if *features_used & (ModelRef::NOrderByte | ModelRef::Word) != ModelRef::None {
+    } else if *features_used & (ModelRef::NOrderByte | ModelRef::Word | ModelRef::TokenPosition)
+        != ModelRef::None
+    {
         static_src += include_str!("js_source/norder_byte.js");
+    }
+
+    if features_used.contains(ModelRef::TokenPosition) {
+        static_src += include_str!("js_source/token_position.js");
     }
 
     if features_used.contains(ModelRef::Mixer) {
@@ -112,6 +119,15 @@ fn generate_js_ctors(
             *features_used |= ModelRef::Word;
             format!("NOrderByte(0, 1, {})", static_model_params.word_max_count)
         }
+        ModelConfig::TokenPosition => {
+            *features_used |= ModelRef::TokenPosition;
+            format!(
+                "TokenPosition({}, {}, {})",
+                static_model_params.token_max_count,
+                static_model_params.token_context_bytes,
+                static_model_params.token_max_position
+            )
+        }
     }
 }
 
@@ -167,6 +183,22 @@ mod tests {
             &mut features_used,
         );
         assert!(js.contains("let model = NOrderByte(0b00000001, 0, 3);"));
+    }
+
+    #[test]
+    fn token_position_params_are_emitted_to_js_constructor() {
+        let mut params = StaticModelParams::default();
+        params.token_max_count = 4;
+        params.token_context_bytes = 0;
+        params.token_max_position = 2;
+        let mut features_used = ModelRef::None;
+        let js = generate_js_decompression_code(
+            &ModelConfig::TokenPosition,
+            &params,
+            &mut features_used,
+        );
+        assert!(js.contains("let model = TokenPosition(4, 0, 2);"));
+        assert!(features_used.contains(ModelRef::TokenPosition));
     }
 }
 

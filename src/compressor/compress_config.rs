@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::model::{
     AdaptiveProbabilityMap, HashTable, LnMixerPred, Model, NOrderByte, NOrderByteData,
+    TokenPosition,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +32,12 @@ pub struct StaticModelParams {
     pub hash_table_pow2_size: u32,
     #[serde(default = "default_word_max_count")]
     pub word_max_count: u32,
+    #[serde(default = "default_token_max_count")]
+    pub token_max_count: u32,
+    #[serde(default = "default_token_context_bytes")]
+    pub token_context_bytes: u8,
+    #[serde(default = "default_token_max_position")]
+    pub token_max_position: u8,
     #[serde(default)]
     pub mixer: MixerModelParams,
 }
@@ -40,6 +47,9 @@ impl Default for StaticModelParams {
         Self {
             hash_table_pow2_size: default_hash_table_pow2_size(),
             word_max_count: default_word_max_count(),
+            token_max_count: default_token_max_count(),
+            token_context_bytes: default_token_context_bytes(),
+            token_max_position: default_token_max_position(),
             mixer: Default::default(),
         }
     }
@@ -74,6 +84,16 @@ fn default_word_max_count() -> u32 {
     15
 }
 
+fn default_token_max_count() -> u32 {
+    4
+}
+fn default_token_context_bytes() -> u8 {
+    1
+}
+fn default_token_max_position() -> u8 {
+    15
+}
+
 fn default_learning_rate() -> f64 {
     0.0004
 }
@@ -104,6 +124,7 @@ pub enum ModelConfig {
     },
     AdaptiveProbabilityMap(Box<ModelConfig>),
     Word,
+    TokenPosition,
 }
 
 impl ModelConfig {
@@ -154,6 +175,12 @@ impl ModelConfig {
             ModelConfig::Word => Box::new(NOrderByte::new_word_model(
                 hash_table,
                 static_model_params.word_max_count,
+            )),
+            ModelConfig::TokenPosition => Box::new(TokenPosition::new(
+                hash_table,
+                static_model_params.token_max_count,
+                static_model_params.token_context_bytes,
+                static_model_params.token_max_position,
             )),
         })
     }
