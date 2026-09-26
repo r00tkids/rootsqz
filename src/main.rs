@@ -51,17 +51,14 @@ mod node_tests {
     use std::{fs::File, io::Read, path::Path};
 
     use crate::compressor::model_finder::create_default_compress_config;
-    use crate::compressor::{compress_config::CompressConfig, Encoder};
+    use crate::compressor::Encoder;
     use crate::web::output_generator::{
         self, render_output, FileWithContent, OutputGenerationOptions,
     };
 
     #[test]
     pub fn round_trip() {
-        let model_config = serde_json::de::from_reader::<_, CompressConfig>(
-            File::open("tests/compress.json").expect("Failed to open tests/compress.json"),
-        )
-        .expect("Failed to parse tests/compress.json");
+        let model_config = create_default_compress_config();
 
         let model = model_config
             .create_model()
@@ -117,10 +114,7 @@ mod node_tests {
 
     #[test]
     pub fn web() {
-        let model_config = serde_json::de::from_reader::<_, CompressConfig>(
-            File::open("tests/compress.json").expect("Failed to open tests/compress.json"),
-        )
-        .expect("Failed to parse tests/compress.json");
+        let model_config = create_default_compress_config();
 
         let model = model_config
             .create_model()
