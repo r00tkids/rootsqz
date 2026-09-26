@@ -50,9 +50,8 @@ Measured whole `index.html` sizes, including the decoder, with `uglifyjs` availa
 | `tests/ray_tracer/index.js` (23,677 bytes) | 8,471 | 8,624 | +153 |
 | Three wrapped copies of the ray tracer (71,093 bytes) | 9,881 | 8,712 | −1,169 |
 | Three wrapped copies with selected identifiers renamed (71,162 bytes) | 9,994 | 9,187 | −807 |
-| `tests/condition/index.js` (232,755 bytes) | 47,692 | 46,979 | −713 |
 
-The ray tracer test that also packs `Cargo.toml` remains 9,055 bytes with the default 4k preset. On the single ray tracer input, decoder and container overhead is 1,626 bytes for 4k and 1,891 bytes for 64k. The 64k preset was chosen from measurements on the two ~71 KiB samples; it is not a universal improvement, and the 4k preset is smaller on the original 23,677-byte ray tracer. The other optional models did not improve whole output size on those samples when added to the default mixer.
+The ray tracer test that also packs `Cargo.toml` remains 9,055 bytes with the default 4k preset. On the single ray tracer input, decoder and container overhead is 1,626 bytes for 4k and 1,891 bytes for 64k. The 64k preset was chosen from measurements on the two ~71 KiB samples, which repeat the same source and favor match prediction. It is not a universal improvement, and the 4k preset is smaller on the original 23,677-byte ray tracer. The other optional models did not improve whole output size on those samples when added to the default mixer.
 
 ## Runtime API
 To access the contents of files specified with `--files` or `--pre-compressed-files`, use `wsqz.files["<FILENAME>"]`.
