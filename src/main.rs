@@ -69,6 +69,48 @@ mod node_tests {
         round_trip_with_config(config, "testout/char_class_round_trip");
     }
 
+    #[test]
+    pub fn optional_models_round_trip() {
+        let optional = [
+            ModelConfig::TokenPosition,
+            ModelConfig::IndirectByte {
+                context_bytes: 2,
+                max_count: 15,
+            },
+        ];
+        for (index, model) in optional.into_iter().enumerate() {
+            let mut config = create_default_compress_config();
+            if let ModelConfig::Mixer { models } = &mut config.model {
+                models.push(model);
+            }
+            round_trip_with_config(config, &format!("testout/optional_model_{index}"));
+        }
+    }
+
+    #[test]
+    pub fn mixed_optional_models_round_trip() {
+        let mut config = create_default_compress_config();
+        if let ModelConfig::Mixer { models } = &mut config.model {
+            models.extend([
+                ModelConfig::CharClass {
+                    order: 3,
+                    max_count: None,
+                },
+                ModelConfig::TokenPosition,
+                ModelConfig::MatchPredictor {
+                    context_bytes: 2,
+                    confidence: 0.97,
+                    table_bits: 16,
+                },
+                ModelConfig::IndirectByte {
+                    context_bytes: 2,
+                    max_count: 15,
+                },
+            ]);
+        }
+        round_trip_with_config(config, "testout/mixed_optional_models");
+    }
+
     fn round_trip_with_config(
         model_config: crate::compressor::compress_config::CompressConfig,
         output_dir: &str,
@@ -105,10 +147,11 @@ mod node_tests {
         )
         .expect("Failed to render output");
 
-        Command::new("node")
+        assert!(Command::new("node")
             .arg(Path::new(output_dir).join("index.mjs"))
             .status()
-            .expect("Failed to run node decompressor");
+            .expect("Failed to run node decompressor")
+            .success());
 
         let output_file = File::open(Path::new(output_dir).join("output.bin"))
             .expect("Failed to open output.bin");

@@ -54,7 +54,7 @@ pub fn generate_js_decompression_code(
     static_src += include_str!("js_source/utils.js");
 
     if *features_used & (ModelRef::CharClass | ModelRef::IndirectByte) != ModelRef::None {
-        static_src += include_str!("js_source/norder_byte_class.js");
+        static_src += include_str!("js_source/norder_byte_extended.js");
     } else if *features_used & (ModelRef::NOrderByte | ModelRef::Word | ModelRef::TokenPosition)
         != ModelRef::None
     {

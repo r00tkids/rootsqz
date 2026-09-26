@@ -10,7 +10,9 @@ pub mod output_generator;
 
 use crate::{
     compressor::{
-        compress_config::CompressConfig, model_finder::create_default_compress_config, Encoder,
+        compress_config::CompressConfig,
+        model_finder::{create_64k_compress_config, create_default_compress_config},
+        Encoder,
     },
     report::ReportGenerator,
 };
@@ -46,6 +48,18 @@ pub struct Args {
     /// Compression model config JSON (uses the embedded default when omitted)
     #[arg(long)]
     pub config: Option<PathBuf>,
+
+    /// Embedded model preset, used when --config is omitted
+    #[arg(long, value_enum, default_value_t = SizeProfile::FourK)]
+    pub size_profile: SizeProfile,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeProfile {
+    #[value(name = "4k")]
+    FourK,
+    #[value(name = "64k")]
+    SixtyFourK,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -55,7 +69,10 @@ pub fn run(args: Args) -> Result<()> {
                 .with_context(|| format!("Failed to read config: {}", path.display()))?,
         )
         .with_context(|| format!("Failed to parse config: {}", path.display()))?,
-        None => create_default_compress_config(),
+        None => match args.size_profile {
+            SizeProfile::FourK => create_default_compress_config(),
+            SizeProfile::SixtyFourK => create_64k_compress_config(),
+        },
     };
 
     println!(

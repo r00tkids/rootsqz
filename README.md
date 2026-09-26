@@ -37,7 +37,22 @@ Options:
 - `--files <FILES>`: Extra files to be compressed. Order matters, so files of similar content should be ordered together.
 - `--pre-compressed-files <FILES>`: Extra files that are already compressed (jpeg, mp4 etc.)
 - `--output-directory <dir>`: Output directory for compressed files
+- `--size-profile <4k|64k>`: Embedded compression preset (default: `4k`). The `64k` preset adds a bounded match predictor for larger JavaScript inputs.
+- `--config <file.json>`: Use a complete JSON `CompressConfig` instead of the embedded preset. This takes precedence over `--size-profile`.
 - See `websqz --help` for more CLI options
+
+Both presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json) or [the 64k preset](src/compressor/size_64k_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, and `{"type":"IndirectByte","context_bytes":2,"max_count":15}`. The decoder is generated from the selected config.
+
+Measured whole `index.html` sizes, including the decoder, with `uglifyjs` available:
+
+| Input | 4k | 64k | 64k change |
+| --- | ---: | ---: | ---: |
+| `tests/ray_tracer/index.js` (23,677 bytes) | 8,471 | 8,624 | +153 |
+| Three wrapped copies of the ray tracer (71,093 bytes) | 9,881 | 8,712 | −1,169 |
+| Three wrapped copies with selected identifiers renamed (71,162 bytes) | 9,994 | 9,187 | −807 |
+| `tests/condition/index.js` (232,755 bytes) | 47,692 | 46,979 | −713 |
+
+The ray tracer test that also packs `Cargo.toml` remains 9,055 bytes with the default 4k preset. On the single ray tracer input, decoder and container overhead is 1,626 bytes for 4k and 1,891 bytes for 64k. The 64k preset was chosen from measurements on the two ~71 KiB samples; it is not a universal improvement, and the 4k preset is smaller on the original 23,677-byte ray tracer. The other optional models did not improve whole output size on those samples when added to the default mixer.
 
 ## Runtime API
 To access the contents of files specified with `--files` or `--pre-compressed-files`, use `wsqz.files["<FILENAME>"]`.
