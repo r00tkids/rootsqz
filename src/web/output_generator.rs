@@ -34,6 +34,7 @@ bitflags! {
         const CharClass = 0b00100000;
         const TokenPosition = 0b01000000;
         const MatchPredictor = 0b10000000;
+        const IndirectByte = 0b100000000;
     }
 }
 
@@ -52,7 +53,7 @@ pub fn generate_js_decompression_code(
     static_src += include_str!("js_source/coder.js");
     static_src += include_str!("js_source/utils.js");
 
-    if features_used.contains(ModelRef::CharClass) {
+    if *features_used & (ModelRef::CharClass | ModelRef::IndirectByte) != ModelRef::None {
         static_src += include_str!("js_source/norder_byte_class.js");
     } else if *features_used & (ModelRef::NOrderByte | ModelRef::Word | ModelRef::TokenPosition)
         != ModelRef::None
@@ -143,6 +144,14 @@ fn generate_js_ctors(
                 "MatchPredictor({}, {}, {})",
                 context_bytes, confidence, table_bits
             )
+        }
+        ModelConfig::IndirectByte {
+            context_bytes,
+            max_count,
+        } => {
+            *features_used |= ModelRef::IndirectByte;
+            *features_used |= ModelRef::NOrderByte;
+            format!("NOrderByte(0, 0, {}, 0, {})", max_count, context_bytes)
         }
     }
 }

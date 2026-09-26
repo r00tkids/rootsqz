@@ -95,6 +95,8 @@ pub struct NOrderByte {
     mask: u64,
     is_word_model: bool,
     class_order: u8,
+    transitions: Option<Vec<u16>>,
+    transition_mask: usize,
 
     bit_ctx: u32,
 }
@@ -122,6 +124,8 @@ impl NOrderByte {
             mask: bit_mask,
             is_word_model: false,
             class_order: 0,
+            transitions: None,
+            transition_mask: 0,
         }
     }
 
@@ -139,6 +143,8 @@ impl NOrderByte {
             mask: u64::MAX,
             is_word_model: true,
             class_order: 0,
+            transitions: None,
+            transition_mask: 0,
         }
     }
 
@@ -159,7 +165,25 @@ impl NOrderByte {
             mask: (1u64 << (order * 3)) - 1,
             is_word_model: false,
             class_order: order,
+            transitions: None,
+            transition_mask: 0,
         }
+    }
+
+    /// Maps a recent byte suffix to its likely successor, then uses that successor
+    /// as the bit model context. This differs from masking the recent bytes.
+    pub fn new_indirect_model(
+        context_bytes: u8,
+        hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+        max_count: u32,
+    ) -> Self {
+        assert!((1..=3).contains(&context_bytes));
+        let mut model = Self::new_norder_model(0, hash_table, max_count);
+        let size = 1usize << (8 * context_bytes);
+        model.magic_num = hash(9191, 2);
+        model.transitions = Some(vec![0; size]);
+        model.transition_mask = size - 1;
+        model
     }
 }
 
@@ -211,7 +235,21 @@ impl Model for NOrderByte {
         if self.bit_ctx >= 256 {
             let current_byte = self.bit_ctx & 0xff;
 
-            if self.is_word_model {
+            if let Some(transitions) = &mut self.transitions {
+                // A saturating vote keeps a stable candidate while allowing replacement.
+                let old_context = self.prev_bytes as usize & self.transition_mask;
+                let entry = &mut transitions[old_context];
+                let candidate = (*entry & 255) as u8;
+                let count = (*entry >> 8) as u8;
+                *entry = if count == 0 || (count == 1 && candidate != current_byte as u8) {
+                    256 | current_byte as u16
+                } else if candidate == current_byte as u8 {
+                    ((count.saturating_add(1) as u16) << 8) | current_byte as u16
+                } else {
+                    (((count - 1) as u16) << 8) | candidate as u16
+                };
+                self.prev_bytes = (self.prev_bytes << 8) | current_byte as u64;
+            } else if self.is_word_model {
                 let next_char = current_byte as u8 as char;
                 if next_char.is_ascii_alphanumeric() || matches!(next_char, '_' | '.' | '[' | ']') {
                     self.prev_bytes = self.prev_bytes ^ next_char.to_ascii_lowercase() as u64;
@@ -225,7 +263,12 @@ impl Model for NOrderByte {
                 self.prev_bytes = (self.prev_bytes << 8) | current_byte as u64;
             }
 
-            let masked_prev_bytes = self.prev_bytes & self.mask;
+            let masked_prev_bytes = if let Some(transitions) = &self.transitions {
+                let entry = transitions[self.prev_bytes as usize & self.transition_mask];
+                (entry & 255) as u64
+            } else {
+                self.prev_bytes & self.mask
+            };
             self.ctx = (hash((masked_prev_bytes >> 32) as u32, 3)
                 .wrapping_mul(9)
                 .wrapping_add(hash(masked_prev_bytes as u32, 3)))

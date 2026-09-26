@@ -9,19 +9,19 @@ let NOrderByteHashMap = HashMap(26, 4, { prob: U24Max >> 1, count: 0 }, (view, v
     };
 });
 
-let NOrderByte = (byteMask, isWord, maxCount = 15, classOrder = 0, indirectBytes = 0) => {
+let NOrderByte = (byteMask, isWord, maxCount = 15, indirectBytes = 0) => {
     let ctx = 0;
     let bitMask = 0n;
     let bitCtx = 1;
     let prevBytes = isWord ? 2166136261n : 0n;
-    let magicNum = hash(isWord ? 1337n : classOrder ? (0x434c4153n ^ BigInt(classOrder)) : indirectBytes ? 9191n : BigInt(byteMask), 2);
+    let magicNum = hash(isWord ? 1337n : indirectBytes ? 9191n : BigInt(byteMask), 2);
     let transitions = indirectBytes ? new Uint16Array(1 << (8 * indirectBytes)) : null;
     let transitionMask = transitions ? transitions.length - 1 : 0;
 
     for (let i = 0; i < 8; i++) {
         bitMask |= BigInt((byteMask >>> i) & 1) * (BigInt(0xff) << BigInt(i * 8));
     }
-    bitMask = isWord ? U64Max : classOrder ? (1n << BigInt(classOrder * 3)) - 1n : bitMask;
+    bitMask = isWord ? U64Max : bitMask;
 
     return {
         pred: () => {
@@ -63,16 +63,6 @@ let NOrderByte = (byteMask, isWord, maxCount = 15, classOrder = 0, indirectBytes
                     } else {
                         prevBytes = 2166136261n;
                     }
-                } else if (classOrder) {
-                    let c = currentByte;
-                    let cls = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 36 ? 1
-                        : c >= 48 && c <= 57 ? 2
-                        : c === 32 || c === 9 || c === 13 || c === 10 ? 3
-                        : c === 39 || c === 34 || c === 96 ? 4
-                        : c === 40 || c === 91 || c === 123 ? 5
-                        : c === 41 || c === 93 || c === 125 ? 6
-                        : c === 46 || c === 44 || c === 58 || c === 59 || c === 43 || c === 45 || c === 42 || c === 61 || c === 60 || c === 62 || c === 33 || c === 38 || c === 124 || c === 37 || c === 94 || c === 126 || c === 63 || c === 47 || c === 92 ? 7 : 0;
-                    prevBytes = ((prevBytes << 3n) | BigInt(cls)) & U64Max;
                 } else {
                     prevBytes = ((prevBytes << 8n) | BigInt(currentByte)) & U64Max;
                 }

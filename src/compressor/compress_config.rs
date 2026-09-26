@@ -131,6 +131,10 @@ pub enum ModelConfig {
         #[serde(default = "default_match_table_bits")]
         table_bits: u32,
     },
+    IndirectByte {
+        context_bytes: u8,
+        max_count: u32,
+    },
 }
 
 fn default_match_table_bits() -> u32 {
@@ -200,6 +204,14 @@ impl ModelConfig {
                 *context_bytes,
                 *confidence,
                 *table_bits,
+            )),
+            ModelConfig::IndirectByte {
+                context_bytes,
+                max_count,
+            } => Box::new(NOrderByte::new_indirect_model(
+                *context_bytes,
+                hash_table,
+                *max_count,
             )),
         })
     }
