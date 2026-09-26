@@ -370,6 +370,98 @@ impl Model for TokenPosition {
     }
 }
 
+/// Predicts bits by copying the byte following an earlier occurrence of the
+/// current byte context. Both the history and lookup table have fixed bounds.
+pub struct MatchPredictor {
+    history: Vec<u8>,
+    keys: Vec<u32>,
+    positions: Vec<usize>,
+    position: usize,
+    context: u32,
+    context_mask: u32,
+    table_mask: usize,
+    match_position: Option<usize>,
+    partial_byte: u16,
+    confidence: f64,
+}
+
+impl MatchPredictor {
+    pub fn new(context_bytes: u32, confidence: f64, table_bits: u32) -> Self {
+        assert!((1..=4).contains(&context_bytes));
+        assert!((0.5..1.0).contains(&confidence));
+        assert!((8..=20).contains(&table_bits));
+        let table_size = 1usize << table_bits;
+        Self {
+            history: vec![0; 1 << 16],
+            keys: vec![0; table_size],
+            positions: vec![0; table_size],
+            position: 0,
+            context: 0,
+            context_mask: if context_bytes == 4 {
+                u32::MAX
+            } else {
+                (1 << (8 * context_bytes)) - 1
+            },
+            table_mask: table_size - 1,
+            match_position: None,
+            partial_byte: 1,
+            confidence,
+        }
+    }
+}
+
+impl Model for MatchPredictor {
+    fn pred(&mut self) -> f64 {
+        match self.match_position {
+            Some(pos) if pos < self.position && self.position - pos <= self.history.len() => {
+                let shift = 7 - self.partial_byte.ilog2();
+                let bit = (self.history[pos & (self.history.len() - 1)] >> shift) & 1;
+                prob_stretch(if bit == 1 {
+                    self.confidence
+                } else {
+                    1.0 - self.confidence
+                })
+            }
+            _ => 0.0,
+        }
+    }
+
+    fn learn(&mut self, bit: u8) {
+        if let Some(pos) = self.match_position {
+            let shift = 7 - self.partial_byte.ilog2();
+            if pos >= self.position
+                || self.position - pos > self.history.len()
+                || (self.history[pos & (self.history.len() - 1)] >> shift) & 1 != bit
+            {
+                self.match_position = None;
+            }
+        }
+        self.partial_byte = (self.partial_byte << 1) | bit as u16;
+        if self.partial_byte >= 256 {
+            let byte = self.partial_byte as u8;
+            let history_slot = self.position & (self.history.len() - 1);
+            self.history[history_slot] = byte;
+            self.position += 1;
+            self.context = ((self.context << 8) | byte as u32) & self.context_mask;
+            let slot = self.context.wrapping_mul(0x9E35A7BD) as usize & self.table_mask;
+            if let Some(pos) = self.match_position {
+                self.match_position = Some(pos + 1);
+            } else {
+                let prior = self.positions[slot];
+                if prior != 0
+                    && self.keys[slot] == self.context
+                    && self.position - (prior - 1) <= self.history.len()
+                {
+                    self.match_position = Some(prior - 1);
+                }
+            }
+            self.keys[slot] = self.context;
+            self.positions[slot] = self.position + 1;
+            self.partial_byte = 1;
+        }
+    }
+}
+
 pub struct ModelWithWeight {
     pub model: Box<dyn Model>,
     pub weight: f64,

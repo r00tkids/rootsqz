@@ -33,6 +33,7 @@ bitflags! {
         const HashTable = 0b00010000;
         const CharClass = 0b00100000;
         const TokenPosition = 0b01000000;
+        const MatchPredictor = 0b10000000;
     }
 }
 
@@ -69,6 +70,10 @@ pub fn generate_js_decompression_code(
 
     if features_used.contains(ModelRef::AdaptiveProbabilityMap) {
         static_src += include_str!("js_source/adaptive_probability_map.js");
+    }
+
+    if features_used.contains(ModelRef::MatchPredictor) {
+        static_src += include_str!("js_source/match_predictor.js");
     }
 
     static_src + "\n" + out_src.as_str()
@@ -126,6 +131,17 @@ fn generate_js_ctors(
                 static_model_params.token_max_count,
                 static_model_params.token_context_bytes,
                 static_model_params.token_max_position
+            )
+        }
+        ModelConfig::MatchPredictor {
+            context_bytes,
+            confidence,
+            table_bits,
+        } => {
+            *features_used |= ModelRef::MatchPredictor;
+            format!(
+                "MatchPredictor({}, {}, {})",
+                context_bytes, confidence, table_bits
             )
         }
     }

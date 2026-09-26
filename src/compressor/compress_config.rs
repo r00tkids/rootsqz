@@ -4,8 +4,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use super::model::{
-    AdaptiveProbabilityMap, HashTable, LnMixerPred, Model, NOrderByte, NOrderByteData,
-    TokenPosition,
+    AdaptiveProbabilityMap, HashTable, LnMixerPred, MatchPredictor, Model, NOrderByte,
+    NOrderByteData, TokenPosition,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +125,16 @@ pub enum ModelConfig {
     AdaptiveProbabilityMap(Box<ModelConfig>),
     Word,
     TokenPosition,
+    MatchPredictor {
+        context_bytes: u32,
+        confidence: f64,
+        #[serde(default = "default_match_table_bits")]
+        table_bits: u32,
+    },
+}
+
+fn default_match_table_bits() -> u32 {
+    16
 }
 
 impl ModelConfig {
@@ -181,6 +191,15 @@ impl ModelConfig {
                 static_model_params.token_max_count,
                 static_model_params.token_context_bytes,
                 static_model_params.token_max_position,
+            )),
+            ModelConfig::MatchPredictor {
+                context_bytes,
+                confidence,
+                table_bits,
+            } => Box::new(MatchPredictor::new(
+                *context_bytes,
+                *confidence,
+                *table_bits,
             )),
         })
     }

@@ -50,6 +50,7 @@ mod node_tests {
     use std::process::Command;
     use std::{fs::File, io::Read, path::Path};
 
+    use crate::compressor::compress_config::ModelConfig;
     use crate::compressor::model_finder::create_default_compress_config;
     use crate::compressor::Encoder;
     use crate::web::output_generator::{
@@ -122,6 +123,48 @@ mod node_tests {
             output_data.as_slice(),
             "Decompressed data does not match original input"
         );
+    }
+
+    #[test]
+    pub fn match_predictor_round_trip() {
+        let mut config = create_default_compress_config();
+        if let ModelConfig::Mixer { models } = &mut config.model {
+            models.push(ModelConfig::MatchPredictor {
+                context_bytes: 2,
+                confidence: 0.97,
+                table_bits: 14,
+            });
+        } else {
+            panic!("default model must be a mixer");
+        }
+
+        let input = b"a repeated phrase with shared context; a repeated phrase with shared context; a repeated phrase with shared context;";
+        let mut encoded = Vec::new();
+        let mut encoder = Encoder::new(config.create_model().unwrap(), &mut encoded).unwrap();
+        encoder.encode_section(&input[..]).unwrap();
+        encoder.finish().unwrap();
+
+        let output_dir = Path::new("testout/match_predictor");
+        render_output(
+            OutputGenerationOptions {
+                output_dir: output_dir.to_owned(),
+                target: output_generator::Target::Node,
+                model_config: config.model,
+                static_model_params: config.static_model_params,
+            },
+            input.len(),
+            encoded,
+            input.len(),
+            vec![],
+            vec![],
+        )
+        .unwrap();
+        assert!(Command::new("node")
+            .arg(output_dir.join("index.mjs"))
+            .status()
+            .unwrap()
+            .success());
+        assert_eq!(std::fs::read(output_dir.join("output.bin")).unwrap(), input);
     }
 
     #[test]
