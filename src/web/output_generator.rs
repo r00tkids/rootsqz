@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::{BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -242,6 +242,74 @@ pub struct BundledFile {
     pub path: PathBuf,
     pub start_offset: u32,
     pub length: u32,
+}
+
+/// Pack a small web demo as a Brotli stream appended to its HTML loader.
+pub fn render_brotli_output(
+    output_dir: &Path,
+    main_js: &[u8],
+    files: &[FileWithContent],
+) -> Result<()> {
+    fs::create_dir_all(output_dir).context("Failed to create output directory")?;
+    let mut source = main_js.to_vec();
+    let mut files_map = Vec::new();
+    for file in files {
+        let name = file
+            .path
+            .file_name()
+            .context("File name")?
+            .to_str()
+            .context("File name to str")?;
+        let start = source.len();
+        source.extend_from_slice(&file.content);
+        files_map.push(format!(
+            "{}:a.slice({},{})",
+            serde_json::to_string(name)?,
+            start,
+            source.len()
+        ));
+    }
+
+    let mut compressed = Vec::new();
+    {
+        let mut writer = brotli::CompressorWriter::new(&mut compressed, 4096, 11, 22);
+        writer
+            .write_all(&source)
+            .context("Failed to compress demo with Brotli")?;
+    }
+    let template = include_str!("templates/web/brotli.html");
+    let render = |offset: usize| -> Result<String> {
+        Ok(Handlebars::new().render_template(
+            template,
+            &json!({
+                "offset": offset,
+                "end": offset + compressed.len(),
+                "js_len": main_js.len(),
+                "files_map": format!("{{{}}}", files_map.join(",")),
+            }),
+        )?)
+    };
+    let mut header = render(0)?;
+    loop {
+        let next = render(header.len())?;
+        if next.len() == header.len() {
+            header = next;
+            break;
+        }
+        header = next;
+    }
+    let path = output_dir.join("index.html");
+    let mut writer =
+        BufWriter::new(fs::File::create(&path).context("Failed to create index.html")?);
+    writer.write_all(header.as_bytes())?;
+    writer.write_all(&compressed)?;
+    writer.flush()?;
+    println!(
+        "Generated '{}' ({} bytes)",
+        path.display(),
+        header.len() + compressed.len()
+    );
+    Ok(())
 }
 
 pub fn render_output(

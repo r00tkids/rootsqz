@@ -32,12 +32,20 @@ Basic compression example:
 websqz --js-main example/index.js -f example/bundled.glsl --output-directory out
 ```
 
+Pass `--brotli` to append a Brotli stream to the single `index.html` for web
+inputs of any size.
+The browser decodes it with `DecompressionStream('brotli')`. This works in
+Firefox 147+ and Safari 18.4+. As of September 2026, Chrome does not support
+Brotli in `DecompressionStream`, so the arithmetic compressor remains the
+default for browser compatibility.
+
 Options:
 - `--js-main <file>`: Entry point JavaScript file
 - `--files <FILES>`: Extra files to be compressed. Order matters, so files of similar content should be ordered together.
 - `--pre-compressed-files <FILES>`: Extra files that are already compressed (jpeg, mp4 etc.)
 - `--output-directory <dir>`: Output directory for compressed files
 - `--size-profile <4k|64k>`: Embedded compression preset (default: `4k`). The `64k` preset adds a bounded match predictor for larger JavaScript inputs.
+- `--brotli`: Use native Brotli decoding for web inputs (Firefox 147+ / Safari 18.4+).
 - `--config <file.json>`: Use a complete JSON `CompressConfig` instead of the embedded preset. This takes precedence over `--size-profile`.
 - See `websqz --help` for more CLI options
 

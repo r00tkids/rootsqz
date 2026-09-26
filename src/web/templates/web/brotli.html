@@ -1,0 +1,8 @@
+<script>
+fetch`#`.then(r=>r.blob()).then(b=>new Response(b.slice({{{offset}}},{{{end}}}).stream().pipeThrough(new DecompressionStream('brotli'))).arrayBuffer()).then(b=>{
+let a=new Uint8Array(b);
+rsqz=wsqz={files:{{{files_map}}}};
+document.body.innerHTML='';
+eval(new TextDecoder().decode(a.slice(0,{{{js_len}}})));
+});
+</script>

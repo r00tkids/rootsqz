@@ -1,10 +1,9 @@
 use std::{
     fs::File,
-    io::Read,
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 pub mod output_generator;
 
@@ -52,6 +51,10 @@ pub struct Args {
     /// Embedded model preset, used when --config is omitted
     #[arg(long, value_enum, default_value_t = SizeProfile::FourK)]
     pub size_profile: SizeProfile,
+
+    /// Pack a web input as a Brotli stream (Firefox 147+ / Safari 18.4+)
+    #[arg(long)]
+    pub brotli: bool,
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +66,38 @@ pub enum SizeProfile {
 }
 
 pub fn run(args: Args) -> Result<()> {
+    let main_js_bytes = std::fs::read(&args.js_main)
+        .with_context(|| format!("Failed to read JS main file: {}", args.js_main))?;
+    if args.brotli {
+        let files: Result<Vec<_>> = args
+            .files
+            .iter()
+            .chain(args.pre_compressed_files.iter())
+            .map(|path| {
+                Ok(output_generator::FileWithContent {
+                    path: PathBuf::from(path),
+                    content: std::fs::read(path)
+                        .with_context(|| format!("Failed to read additional file: {path}"))?,
+                })
+            })
+            .collect();
+        let files = files?;
+        let source_len =
+            main_js_bytes.len() + files.iter().map(|file| file.content.len()).sum::<usize>();
+        if args.target != output_generator::Target::Web {
+            bail!("--brotli requires the web target");
+        }
+        if args.config.is_some() || args.size_profile != SizeProfile::FourK || args.report {
+            bail!("--brotli cannot be combined with --config, --size-profile 64k, or --report");
+        }
+        println!("Packing {} source bytes with Brotli", source_len);
+        return output_generator::render_brotli_output(
+            Path::new(&args.output_directory),
+            &main_js_bytes,
+            &files,
+        );
+    }
+
     let model_config: CompressConfig = match &args.config {
         Some(path) => serde_json::from_slice(
             &std::fs::read(path)
@@ -83,11 +118,6 @@ pub fn run(args: Args) -> Result<()> {
     let model = model_config
         .create_model()
         .context("Failed to create model from config")?;
-
-    let mut main_js_bytes = Vec::new();
-    File::open(&args.js_main)
-        .context(format!("Failed to open JS main file: {}", args.js_main))?
-        .read_to_end(&mut main_js_bytes)?;
 
     let mut encoded_data: Vec<u8> = Vec::new();
     let mut encoder = Encoder::new(model, &mut encoded_data)?;
