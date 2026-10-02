@@ -16,6 +16,6 @@
   },
   "dependencies": {
     "module-from-string": "^3.3.1",
-    "rollup-plugin-websqz": "link:.."
+    "rollup-plugin-rootsqz": "link:.."
   }
 }

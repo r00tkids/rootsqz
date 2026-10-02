@@ -1,4 +1,4 @@
-import smallWasm from "./assets/plasma.wasm?websqz-bin&raw";
+import smallWasm from "./assets/plasma.wasm?rootsqz-bin&raw";
 
 const width = 128;
 const height = 128;

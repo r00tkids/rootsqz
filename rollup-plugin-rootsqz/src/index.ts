@@ -6,7 +6,7 @@ import path from "node:path";
 import child_process from "node:child_process";
 import { createFilter, FilterPattern } from "@rollup/pluginutils";
 
-type WebSqzFile = {
+type RootSqzFile = {
   fileName: string;
   content: Buffer;
   isCompressed: boolean;
@@ -14,14 +14,14 @@ type WebSqzFile = {
   isText: boolean;
 };
 
-export type WebsqzFileTransformRes = {
+export type RootsqzFileTransformRes = {
   /**
    * The result of processing
    */
   content: Buffer;
 
   /**
-   * Is already compressed and should not be compressed again by websqz
+   * Is already compressed and should not be compressed again by rootsqz
    */
   isCompressed: boolean;
 
@@ -40,35 +40,35 @@ export type WebsqzFileTransformRes = {
   fileExt?: string;
 };
 
-type WebSqzOptions = {
-  websqzPath?: string;
+type RootSqzOptions = {
+  rootsqzPath?: string;
 
   /**
-   * File transform hooks to process files before they are imported in code or compressed by websqz
+   * File transform hooks to process files before they are imported in code or compressed by rootsqz
    */
   fileTransforms?: [
     {
       include?: FilterPattern,
       exclude?: FilterPattern,
-      transform: (ctx: PluginContext, id: string, content: Buffer) => Promise<WebsqzFileTransformRes>;
+      transform: (ctx: PluginContext, id: string, content: Buffer) => Promise<RootsqzFileTransformRes>;
     }
   ]
 };
 
-type WebSqzCliOptions = {
+type RootSqzCliOptions = {
   jsMain: string;
   files: string[];
   preCompressedFiles: string[];
   output: string;
 }
 
-class WebSqzExe {
-  websqzPath: string;
-  constructor(websqzPath: string) {
-    this.websqzPath = websqzPath;
+class RootSqzExe {
+  rootsqzPath: string;
+  constructor(rootsqzPath: string) {
+    this.rootsqzPath = rootsqzPath;
   }
 
-  async run(cliOptions: WebSqzCliOptions): Promise<void> {
+  async run(cliOptions: RootSqzCliOptions): Promise<void> {
     const args: string[] = [];
 
     args.push("--js-main", cliOptions.jsMain);
@@ -82,7 +82,7 @@ class WebSqzExe {
 
     args.push("--output-directory", cliOptions.output);
 
-    const spawn = await child_process.spawn(this.websqzPath, args, {
+    const spawn = await child_process.spawn(this.rootsqzPath, args, {
       stdio: "inherit",
     });
 
@@ -93,7 +93,7 @@ class WebSqzExe {
 
       spawn.once("close", (code) => {
         if (code !== 0) {
-          reject(new Error(`websqz process exited with code ${code}`));
+          reject(new Error(`rootsqz process exited with code ${code}`));
         } else {
           resolve();
         }
@@ -102,25 +102,28 @@ class WebSqzExe {
   }
 }
 
-function websqzExecutablePath(executablePath: string | undefined): string {
+// The rootsqz repository still builds and releases its executable as "websqz"
+const EXECUTABLE_NAME = "websqz";
+
+function rootsqzExecutablePath(executablePath: string | undefined): string {
   if (!executablePath) {
-    const path = import.meta.dirname + "/bin/websqz";
+    const path = import.meta.dirname + "/bin/" + EXECUTABLE_NAME;
     const extension = process.platform == "win32" ? ".exe" : "";
 
     if (fsSync.existsSync(path + extension)) {
       return path + extension;
     }
 
-    return "websqz" + extension;
+    return EXECUTABLE_NAME + extension;
   }
 
   return executablePath;
 }
 
-export default function (options: WebSqzOptions = {}): Plugin {
+export default function (options: RootSqzOptions = {}): Plugin {
   const isBuild = process.env.NODE_ENV === "production";
-  const websqzExePath = websqzExecutablePath(options.websqzPath);
-  const websqzExe = new WebSqzExe(websqzExePath);
+  const rootsqzExePath = rootsqzExecutablePath(options.rootsqzPath);
+  const rootsqzExe = new RootSqzExe(rootsqzExePath);
 
   const fileTransforms = options.fileTransforms?.map(transform => {
     const include = transform.include ? (Array.isArray(transform.include) ? transform.include : [transform.include]) 
@@ -135,7 +138,7 @@ export default function (options: WebSqzOptions = {}): Plugin {
     }
   });
 
-  const files = new Map<string, WebSqzFile>();
+  const files = new Map<string, RootSqzFile>();
   let fileNameIdx = 0;
 
   const findNextAvailableFileName = () => {
@@ -156,7 +159,7 @@ export default function (options: WebSqzOptions = {}): Plugin {
     return candidateName;
   }
 
-  const loadAndTransform = async function (id: string, hookRes: WebsqzFileTransformRes) {
+  const loadAndTransform = async function (id: string, hookRes: RootsqzFileTransformRes) {
     if (isBuild) {
       const fileName = findNextAvailableFileName();
       files.set(id, {
@@ -186,7 +189,7 @@ export default function (options: WebSqzOptions = {}): Plugin {
   };
 
   return {
-    name: "rollup-plugin-websqz",
+    name: "rollup-plugin-rootsqz",
 
     load: {
       order: "pre",
@@ -218,24 +221,24 @@ export default function (options: WebSqzOptions = {}): Plugin {
           }
         }
 
-        const isWebSqzTxt = parsed["websqz-txt"] != null;
-        const isWebSqzBin = parsed["websqz-bin"] != null;
+        const isRootSqzTxt = parsed["rootsqz-txt"] != null;
+        const isRootSqzBin = parsed["rootsqz-bin"] != null;
 
-        if (isWebSqzTxt && isWebSqzBin) {
+        if (isRootSqzTxt && isRootSqzBin) {
           throw new Error(
-            `Cannot use both websqz-txt and websqz-bin on the same import: ${id}`,
+            `Cannot use both rootsqz-txt and rootsqz-bin on the same import: ${id}`,
           );
         }
 
         const isCompressed = parsed["compressed"] != null;
 
-        if (isWebSqzTxt || isWebSqzBin) {
+        if (isRootSqzTxt || isRootSqzBin) {
           const content = await loadFromDisk();
           
-          let hookRes: WebsqzFileTransformRes = {
+          let hookRes: RootsqzFileTransformRes = {
             content,
             isCompressed,
-            isText: isWebSqzTxt,
+            isText: isRootSqzTxt,
             fileExt: path.extname(cleanedUpId),
           };
           return await loadAndTransform(id, hookRes);
@@ -259,7 +262,7 @@ export default function (options: WebSqzOptions = {}): Plugin {
       if (isBuild) {
         const outDir = path.resolve(
             outputOptions.dir || "",
-            "websqz-tmp");
+            "rootsqz-tmp");
         if (await fs.stat(outDir).catch(() => false)) {
           await fs.rm(outDir, { recursive: true, force: true });
         }
@@ -268,10 +271,10 @@ export default function (options: WebSqzOptions = {}): Plugin {
         const preCompressedFiles = [];
 
         for (const [id, file] of files) {
-          this.debug(`Copying '${id}' for websqz...`);
+          this.debug(`Copying '${id}' for rootsqz...`);
           const outPath = path.resolve(
             outputOptions.dir || "",
-            "websqz-tmp",
+            "rootsqz-tmp",
             file.fileName,
           );
 
@@ -285,11 +288,11 @@ export default function (options: WebSqzOptions = {}): Plugin {
           }
         }
 
-        // Sort by file extension for better compression ratios in websqz
+        // Sort by file extension for better compression ratios in rootsqz
         filesToCompress.sort((a, b) => Math.sign(a.fileExt.localeCompare(b.fileExt)) + 2 * (a.isText === b.isText ? 0 : a.isText ? -1 : 1));
 
-        this.info(`Using websqz executable at '${websqzExe.websqzPath}'`);
-        await websqzExe.run({
+        this.info(`Using rootsqz executable at '${rootsqzExe.rootsqzPath}'`);
+        await rootsqzExe.run({
           jsMain: path.resolve(
             outputOptions.dir || "",
             jsFileName,
@@ -298,12 +301,12 @@ export default function (options: WebSqzOptions = {}): Plugin {
           preCompressedFiles: preCompressedFiles,
           output: path.resolve(
             outputOptions.dir || "",
-            "websqz-output",
+            "rootsqz-output",
           ),
         });
 
-        const relOutPath = path.relative(".", path.resolve(outputOptions.dir || "", "websqz-output"));
-        this.info(`Websqz completed, output at '${relOutPath}'.\nRun 'python -m http.server -d ${relOutPath}' to serve the output.`);
+        const relOutPath = path.relative(".", path.resolve(outputOptions.dir || "", "rootsqz-output"));
+        this.info(`Rootsqz completed, output at '${relOutPath}'.\nRun 'python -m http.server -d ${relOutPath}' to serve the output.`);
       }
     },
   };

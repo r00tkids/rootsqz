@@ -1,34 +1,34 @@
-# rollup-plugin-websqz
-![NPM Version](https://img.shields.io/npm/v/rollup-plugin-websqz)
+# rollup-plugin-rootsqz
+![NPM Version](https://img.shields.io/npm/v/rollup-plugin-rootsqz)
 
-Rollup / Vite plugin for using [websqz](https://github.com/r00tkids/websqz) to compress and bundle code and assets into one HTML file. This is intented for intros in the [demoscene](https://en.wikipedia.org/wiki/Demoscene) or size restricted JS challenges.
+Rollup / Vite plugin for using [rootsqz](https://github.com/r00tkids/rootsqz) to compress and bundle code and assets into one HTML file. This is intented for intros in the [demoscene](https://en.wikipedia.org/wiki/Demoscene) or size restricted JS challenges.
 
 ## Install
-`npm i rollup-plugin-websqz`
+`npm i rollup-plugin-rootsqz`
 
 ## Usage
 ```js
 // vite.config.js
 import { defineConfig } from 'vite';
-import websqz from 'rollup-plugin-websqz';
+import rootsqz from 'rollup-plugin-rootsqz';
 
 export default defineConfig({
-  plugins: [websqz()]
+  plugins: [rootsqz()]
 });
 ```
 
-See the [example](https://github.com/r00tkids/rollup-plugin-websqz/tree/main/example) for a working example with support for `vite-plugin-glsl`.
+See the [example](https://github.com/r00tkids/rootsqz/tree/main/rollup-plugin-rootsqz/example) for a working example with support for `vite-plugin-glsl`.
 
 ## Example Options
 ```js
-websqz({
+rootsqz({
     /*
-    Full path to the websqz executable.
-    If null (default), the plugin uses the websqz executable
+    Full path to the rootsqz executable (currently named `websqz`).
+    If null (default), the plugin uses the executable
     installed when installing the npm package.
-    Otherwise it will try to resolve websqz from your system PATH.
+    Otherwise it will try to resolve `websqz` from your system PATH.
     */
-    websqzPath: null,
+    rootsqzPath: null,
     fileTransforms: [
         {
             include: /\.glsl$/,

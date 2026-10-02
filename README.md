@@ -2,7 +2,7 @@
 websqz is a tool for compressing and decompressing demo intros for the web. The current overhead is about 1.6 KiB, so it's primarily intended for 64KiB intros, though this may change in the future. 
 It's inspired by [Crinkler](https://github.com/runestubbe/Crinkler) and ZPaq series of compressors.
 
-Also see the rollup / Vite plugin: https://github.com/r00tkids/rollup-plugin-websqz
+Also see the rollup / Vite plugin in [rollup-plugin-rootsqz](rollup-plugin-rootsqz).
 
 ## Features
 - High compression ratio for JavaScript and binary assets - about 20% better than deflate-raw

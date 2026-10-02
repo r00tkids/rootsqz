@@ -11,7 +11,7 @@ importers:
       module-from-string:
         specifier: ^3.3.1
         version: 3.3.1
-      rollup-plugin-websqz:
+      rollup-plugin-rootsqz:
         specifier: link:..
         version: link:..
     devDependencies:

@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import glsl from 'vite-plugin-glsl';
-import websqz from 'rollup-plugin-websqz';
+import rootsqz from 'rollup-plugin-rootsqz';
 import { importFromString } from 'module-from-string';
 
 let glslPlugin = glsl({ minify: true });
@@ -14,7 +14,7 @@ export default defineConfig({
         modulePreload: false,
     },
     plugins: [
-        websqz({
+        rootsqz({
             fileTransforms: [
                 {
                     include: [/\.glsl$/, /\.frag$/, /\.vert$/],

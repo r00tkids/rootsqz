@@ -4,8 +4,9 @@ const http = require("http");
 const path = require("path");
 const os = require("os");
 
-const RELEASE_BASE_URL = "https://github.com/r00tkids/websqz/releases/download";
+const RELEASE_BASE_URL = "https://github.com/r00tkids/rootsqz/releases/download";
 const VERSION = "0.4";
+// The rootsqz repository still builds and releases its executable as "websqz"
 const TOOL_NAME = "websqz";
 const BIN_DIR = path.resolve(__dirname, "../dist/bin");
 
@@ -147,7 +148,7 @@ async function main() {
     console.log(`From: ${url}`);
 
     if (fs.existsSync(BIN_DIR + "/" + TOOL_NAME + ext)) {
-      console.log(`WebSQZ binary already exists at ${BIN_DIR}/${TOOL_NAME}${ext}, skipping download.`);
+      console.log(`rootsqz binary already exists at ${BIN_DIR}/${TOOL_NAME}${ext}, skipping download.`);
       return;
     }
 

@@ -1,5 +1,5 @@
 {
-  "name": "rollup-plugin-websqz",
+  "name": "rollup-plugin-rootsqz",
   "version": "1.1.3",
   "type": "module",
   "description": "",
@@ -22,14 +22,15 @@
   "keywords": [
     "rollup-plugin",
     "vite-plugin",
-    "websqz",
+    "rootsqz",
     "compression"
   ],
   "author": "",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/r00tkids/rollup-plugin-websqz.git"
+    "url": "https://github.com/r00tkids/rootsqz.git",
+    "directory": "rollup-plugin-rootsqz"
   },
   "dependencies": {
     "@rollup/pluginutils": "^5.3.0",
