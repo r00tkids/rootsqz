@@ -1,21 +1,16 @@
 {
-  "name": "example",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "rootsqz-example-vite",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "vite build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.14.0",
   "devDependencies": {
+    "@rootkids/rollup-plugin-rootsqz": "workspace:*",
+    "module-from-string": "^3.3.1",
     "vite": "^7.3.1",
     "vite-plugin-glsl": "^1.5.5"
-  },
-  "dependencies": {
-    "module-from-string": "^3.3.1",
-    "rollup-plugin-rootsqz": "link:.."
   }
 }

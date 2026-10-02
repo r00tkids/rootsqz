@@ -1,34 +1,35 @@
-# rollup-plugin-rootsqz
-![NPM Version](https://img.shields.io/npm/v/rollup-plugin-rootsqz)
+# @rootkids/rollup-plugin-rootsqz
+![NPM Version](https://img.shields.io/npm/v/%40rootkids%2Frollup-plugin-rootsqz)
 
 Rollup / Vite plugin for using [rootsqz](https://github.com/r00tkids/rootsqz) to compress and bundle code and assets into one HTML file. This is intented for intros in the [demoscene](https://en.wikipedia.org/wiki/Demoscene) or size restricted JS challenges.
 
 ## Install
-`npm i rollup-plugin-rootsqz`
+`npm i -D @rootkids/rollup-plugin-rootsqz`
+
+This installs the rootsqz executable for your platform through [`@rootkids/rootsqz`](https://www.npmjs.com/package/@rootkids/rootsqz). The plugin and the executable share one version.
 
 ## Usage
 ```js
 // vite.config.js
 import { defineConfig } from 'vite';
-import rootsqz from 'rollup-plugin-rootsqz';
+import rootsqz from '@rootkids/rollup-plugin-rootsqz';
 
 export default defineConfig({
   plugins: [rootsqz()]
 });
 ```
 
-See the [example](https://github.com/r00tkids/rootsqz/tree/main/rollup-plugin-rootsqz/example) for a working example with support for `vite-plugin-glsl`.
+See the [example](https://github.com/r00tkids/rootsqz/tree/main/examples/vite) for a working example with support for `vite-plugin-glsl`.
 
 ## Example Options
 ```js
 rootsqz({
     /*
-    Full path to the rootsqz executable (currently named `websqz`).
-    If null (default), the plugin uses the executable
-    installed when installing the npm package.
-    Otherwise it will try to resolve `websqz` from your system PATH.
+    Full path to the rootsqz executable.
+    By default the plugin uses the executable installed with the npm package,
+    or the one named by the environment variable ROOTSQZ_BINARY_PATH.
     */
-    rootsqzPath: null,
+    rootsqzPath: undefined,
     /*
     Embedded compression preset, "4k" (default) or "64k".
     The 64k preset adds a bounded match predictor for larger JavaScript inputs.
@@ -51,8 +52,7 @@ rootsqz({
     report: false,
     /*
     Name of the global that the boot code of the executable puts the files in.
-    By default the plugin asks the executable for its version:
-    `wsqz` up to 0.4.0, `rsqz` from 0.4.1.
+    By default `rsqz`. Set it to `wsqz` when `rootsqzPath` names an executable up to 0.4.0.
     */
     runtimeGlobal: undefined,
     /*
@@ -74,7 +74,3 @@ rootsqz({
     ]
 })
 ```
-
-`sizeProfile`, `brotli` and `config` need an executable newer than the 0.4 release that
-the install script downloads. Build one from the [rootsqz](https://github.com/r00tkids/rootsqz)
-repository with `cargo build --release` and point `rootsqzPath` at `target/release/rootsqz`.

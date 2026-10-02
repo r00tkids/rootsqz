@@ -1,10 +1,9 @@
 import { PluginContext, rollup, type OutputAsset, type OutputChunk, type OutputOptions, type Plugin } from "rollup";
 import querystring from "node:querystring";
 import fs from "node:fs/promises";
-import fsSync from "node:fs";
 import path from "node:path";
-import child_process from "node:child_process";
 import { createFilter, FilterPattern } from "@rollup/pluginutils";
+import { compress, RUNTIME_GLOBAL } from "@rootkids/rootsqz";
 
 type RootSqzFile = {
   fileName: string;
@@ -41,6 +40,10 @@ export type RootsqzFileTransformRes = {
 };
 
 type RootSqzOptions = {
+  /**
+   * Path of the rootsqz executable. By default the one installed with `@rootkids/rootsqz`,
+   * or the one named by the environment variable `ROOTSQZ_BINARY_PATH`.
+   */
   rootsqzPath?: string;
 
   /**
@@ -67,8 +70,7 @@ type RootSqzOptions = {
 
   /**
    * Name of the global that the boot code of the executable puts the files in.
-   * By default it follows the version the executable reports:
-   * `wsqz` up to 0.4.0, `rsqz` from 0.4.1.
+   * By default `rsqz`. Set it to `wsqz` when `rootsqzPath` names an executable up to 0.4.0.
    */
   runtimeGlobal?: string;
 
@@ -89,119 +91,13 @@ type RootSqzOptions = {
   ]
 };
 
-type RootSqzCliOptions = {
-  jsMain: string;
-  files: string[];
-  preCompressedFiles: string[];
-  output: string;
-  sizeProfile?: "4k" | "64k";
-  brotli?: boolean;
-  config?: string;
-  report?: boolean;
-  extraArgs: string[];
-}
-
-class RootSqzExe {
-  rootsqzPath: string;
-  constructor(rootsqzPath: string) {
-    this.rootsqzPath = rootsqzPath;
-  }
-
-  async run(cliOptions: RootSqzCliOptions): Promise<void> {
-    const args: string[] = [];
-
-    args.push("--js-main", cliOptions.jsMain);
-
-    for (const file of cliOptions.files) {
-      args.push("--files", file);
-    }
-    for (const preCompressedFile of cliOptions.preCompressedFiles) {
-      args.push("--pre-compressed-files", preCompressedFile);
-    }
-
-    args.push("--output-directory", cliOptions.output);
-
-    if (cliOptions.config) {
-      args.push("--config", cliOptions.config);
-    }
-    if (cliOptions.sizeProfile) {
-      args.push("--size-profile", cliOptions.sizeProfile);
-    }
-    if (cliOptions.brotli) {
-      args.push("--brotli");
-    }
-    if (cliOptions.report) {
-      args.push("--report");
-    }
-    args.push(...cliOptions.extraArgs);
-
-    const spawn = await child_process.spawn(this.rootsqzPath, args, {
-      stdio: "inherit",
-    });
-
-    return new Promise<void>((resolve, reject) => {
-      spawn.once("error", (err) => {
-        reject(err);
-      });
-
-      spawn.once("close", (code) => {
-        if (code !== 0) {
-          reject(new Error(`rootsqz process exited with code ${code}`));
-        } else {
-          resolve();
-        }
-      });
-    });
-  }
-}
-
-// The rootsqz repository still builds and releases its executable as "websqz"
-const EXECUTABLE_NAME = "websqz";
-
-function rootsqzExecutablePath(executablePath: string | undefined): string {
-  if (!executablePath) {
-    const path = import.meta.dirname + "/bin/" + EXECUTABLE_NAME;
-    const extension = process.platform == "win32" ? ".exe" : "";
-
-    if (fsSync.existsSync(path + extension)) {
-      return path + extension;
-    }
-
-    return EXECUTABLE_NAME + extension;
-  }
-
-  return executablePath;
-}
-
-/**
- * The boot code of the executable names its global `wsqz` up to 0.4.0
- * and `rsqz` from 0.4.1.
- */
-function detectRuntimeGlobal(executablePath: string): string {
-  try {
-    const out = child_process.execFileSync(executablePath, ["--version"], { encoding: "utf-8" });
-    const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(out);
-    if (m) {
-      const [major, minor, patch] = [m[1], m[2], m[3] ?? "0"].map(Number);
-      if (major === 0 && (minor < 4 || (minor === 4 && patch < 1))) {
-        return "wsqz";
-      }
-    }
-  } catch {
-    // Not runnable now, the build reports that when it runs the executable
-  }
-  return "rsqz";
-}
-
 export default function (options: RootSqzOptions = {}): Plugin {
   if (options.brotli && (options.config || options.report || options.sizeProfile === "64k")) {
     throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
   }
 
   const isBuild = process.env.NODE_ENV === "production";
-  const rootsqzExePath = rootsqzExecutablePath(options.rootsqzPath);
-  const runtimeGlobal = options.runtimeGlobal ?? (isBuild ? detectRuntimeGlobal(rootsqzExePath) : "rsqz");
-  const rootsqzExe = new RootSqzExe(rootsqzExePath);
+  const runtimeGlobal = options.runtimeGlobal ?? RUNTIME_GLOBAL;
 
   const fileTransforms = options.fileTransforms?.map(transform => {
     const include = transform.include ? (Array.isArray(transform.include) ? transform.include : [transform.include]) 
@@ -369,15 +265,15 @@ export default function (options: RootSqzOptions = {}): Plugin {
         // Sort by file extension for better compression ratios in rootsqz
         filesToCompress.sort((a, b) => Math.sign(a.fileExt.localeCompare(b.fileExt)) + 2 * (a.isText === b.isText ? 0 : a.isText ? -1 : 1));
 
-        this.info(`Using rootsqz executable at '${rootsqzExe.rootsqzPath}'`);
-        await rootsqzExe.run({
+        await compress({
+          binaryPath: options.rootsqzPath,
           jsMain: path.resolve(
             outputOptions.dir || "",
             jsFileName,
           ),
           files: filesToCompress.map(f => f.path),
           preCompressedFiles: preCompressedFiles,
-          output: path.resolve(
+          outputDirectory: path.resolve(
             outputOptions.dir || "",
             "rootsqz-output",
           ),
@@ -385,7 +281,7 @@ export default function (options: RootSqzOptions = {}): Plugin {
           brotli: options.brotli,
           config: options.config,
           report: options.report,
-          extraArgs: options.rootsqzArgs ?? [],
+          extraArgs: options.rootsqzArgs,
         });
 
         const relOutPath = path.relative(".", path.resolve(outputOptions.dir || "", "rootsqz-output"));

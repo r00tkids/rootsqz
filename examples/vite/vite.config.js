@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import glsl from 'vite-plugin-glsl';
-import rootsqz from 'rollup-plugin-rootsqz';
+import rootsqz from '@rootkids/rollup-plugin-rootsqz';
 import { importFromString } from 'module-from-string';
 
 let glslPlugin = glsl({ minify: true });
@@ -15,8 +15,7 @@ export default defineConfig({
     },
     plugins: [
         rootsqz({
-            // Set ROOTSQZ_PATH to use a locally built executable, e.g. ../../target/release/rootsqz
-            rootsqzPath: process.env.ROOTSQZ_PATH,
+            // Set ROOTSQZ_BINARY_PATH to use another executable, e.g. ../../target/release/rootsqz
             sizeProfile: process.env.ROOTSQZ_SIZE_PROFILE,
             brotli: process.env.ROOTSQZ_BROTLI === "1",
             fileTransforms: [
