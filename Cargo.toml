@@ -1,7 +1,7 @@
 [package]
-name = "websqz"
+name = "rootsqz"
 authors = ["Emil Sandstø"]
-description = "Websqz is a tool for compressing and decompressing demo intros for web."
+description = "Rootsqz is a tool for compressing and decompressing demo intros for web."
 version = "0.4.1"
 edition = "2021"
 

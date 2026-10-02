@@ -77,4 +77,4 @@ rootsqz({
 
 `sizeProfile`, `brotli` and `config` need an executable newer than the 0.4 release that
 the install script downloads. Build one from the [rootsqz](https://github.com/r00tkids/rootsqz)
-repository with `cargo build --release` and point `rootsqzPath` at `target/release/websqz`.
+repository with `cargo build --release` and point `rootsqzPath` at `target/release/rootsqz`.

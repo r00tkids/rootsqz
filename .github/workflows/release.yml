@@ -38,12 +38,12 @@ jobs:
       - name: Copy binary to expected name
         shell: bash
         run: |
-          cp target/${{ steps.host_triple.outputs.HOST_TRIPLE }}/release/websqz${{ steps.binary_name.outputs.EXE_EXT }} websqz${{ steps.binary_name.outputs.EXE_EXT }}
+          cp target/${{ steps.host_triple.outputs.HOST_TRIPLE }}/release/rootsqz${{ steps.binary_name.outputs.EXE_EXT }} rootsqz${{ steps.binary_name.outputs.EXE_EXT }}
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: websqz-${{ steps.host_triple.outputs.HOST_TRIPLE }}
-          path: websqz${{ steps.binary_name.outputs.EXE_EXT }}
+          name: rootsqz-${{ steps.host_triple.outputs.HOST_TRIPLE }}
+          path: rootsqz${{ steps.binary_name.outputs.EXE_EXT }}
           retention-days: 2
   release:
     needs: build
@@ -63,7 +63,7 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v6
         with:
-          pattern: websqz-*
+          pattern: rootsqz-*
           path: bin
           merge-multiple: false
       - name: Upload Linux artifact (x86_64)
@@ -72,8 +72,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: bin/websqz-x86_64-unknown-linux-gnu/websqz
-          asset_name: websqz-x86_64-unknown-linux-gnu
+          asset_path: bin/rootsqz-x86_64-unknown-linux-gnu/rootsqz
+          asset_name: rootsqz-x86_64-unknown-linux-gnu
           asset_content_type: application/octet-stream
       - name: Upload Windows artifact (x86_64)
         uses: actions/upload-release-asset@v1
@@ -81,8 +81,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: bin/websqz-x86_64-pc-windows-msvc/websqz.exe
-          asset_name: websqz-x86_64-pc-windows-msvc.exe
+          asset_path: bin/rootsqz-x86_64-pc-windows-msvc/rootsqz.exe
+          asset_name: rootsqz-x86_64-pc-windows-msvc.exe
           asset_content_type: application/octet-stream
       - name: Upload MacOS artifact (aarch64)
         uses: actions/upload-release-asset@v1
@@ -90,6 +90,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: bin/websqz-aarch64-apple-darwin/websqz
-          asset_name: websqz-aarch64-apple-darwin
+          asset_path: bin/rootsqz-aarch64-apple-darwin/rootsqz
+          asset_name: rootsqz-aarch64-apple-darwin
           asset_content_type: application/octet-stream

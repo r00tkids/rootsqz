@@ -15,7 +15,7 @@ export default defineConfig({
     },
     plugins: [
         rootsqz({
-            // Set ROOTSQZ_PATH to use a locally built executable, e.g. ../../target/release/websqz
+            // Set ROOTSQZ_PATH to use a locally built executable, e.g. ../../target/release/rootsqz
             rootsqzPath: process.env.ROOTSQZ_PATH,
             sizeProfile: process.env.ROOTSQZ_SIZE_PROFILE,
             brotli: process.env.ROOTSQZ_BROTLI === "1",

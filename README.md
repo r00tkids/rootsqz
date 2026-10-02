@@ -1,5 +1,5 @@
-# websqz
-websqz is a tool for compressing and decompressing demo intros for the web. The current overhead is about 1.6 KiB, so it's primarily intended for 64KiB intros, though this may change in the future. 
+# rootsqz
+rootsqz is a tool for compressing and decompressing demo intros for the web. The current overhead is about 1.6 KiB, so it's primarily intended for 64KiB intros, though this may change in the future. 
 It's inspired by [Crinkler](https://github.com/runestubbe/Crinkler) and ZPaq series of compressors.
 
 Also see the rollup / Vite plugin in [rollup-plugin-rootsqz](rollup-plugin-rootsqz).
@@ -12,15 +12,15 @@ Also see the rollup / Vite plugin in [rollup-plugin-rootsqz](rollup-plugin-roots
 
 1. Clone the repository:
    ```sh
-   git clone https://github.com/r00tkids/websqz.git
-   cd websqz
+   git clone https://github.com/r00tkids/rootsqz.git
+   cd rootsqz
    ```
 2. Install dependencies:
    - Install [UglifyJS](https://github.com/mishoo/UglifyJS):
      ```sh
      npm install -g uglify-js
      ```
-   - Build and install websqz (requires Rust and Cargo):
+   - Build and install rootsqz (requires Rust and Cargo):
      ```sh
      cargo install --path .
      ```
@@ -29,7 +29,7 @@ Also see the rollup / Vite plugin in [rollup-plugin-rootsqz](rollup-plugin-roots
 
 Basic compression example:
 ```sh
-websqz --js-main example/index.js -f example/bundled.glsl --output-directory out
+rootsqz --js-main example/index.js -f example/bundled.glsl --output-directory out
 ```
 
 Pass `--brotli` to append a Brotli stream to the single `index.html` for web
@@ -47,7 +47,7 @@ Options:
 - `--size-profile <4k|64k>`: Embedded compression preset (default: `4k`). The `64k` preset adds a bounded match predictor for larger JavaScript inputs.
 - `--brotli`: Use native Brotli decoding for web inputs (Firefox 147+ / Safari 18.4+).
 - `--config <file.json>`: Use a complete JSON `CompressConfig` instead of the embedded preset. This takes precedence over `--size-profile`.
-- See `websqz --help` for more CLI options
+- See `rootsqz --help` for more CLI options
 
 Both presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json) or [the 64k preset](src/compressor/size_64k_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, and `{"type":"IndirectByte","context_bytes":2,"max_count":15}`. The decoder is generated from the selected config.
 

@@ -40,7 +40,7 @@ pub struct Args {
     #[arg(short, long, default_value = "web")]
     pub target: output_generator::Target,
 
-    /// If set, reports detailed compression statistics to websqz-report.html
+    /// If set, reports detailed compression statistics to report.html in the output directory
     #[arg(short, long)]
     pub report: bool,
 
@@ -111,7 +111,7 @@ pub fn run(args: Args) -> Result<()> {
     };
 
     println!(
-        "Starting compression (websqz v{})",
+        "Starting compression (rootsqz v{})",
         env!("CARGO_PKG_VERSION")
     );
     println!("Initializing hash table...");
