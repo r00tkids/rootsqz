@@ -20,3 +20,30 @@ jobs:
         run: cargo build --release --verbose
       - name: Run tests
         run: cargo test --release --verbose
+  npm:
+    name: Build npm packages and example
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Check that the crate and the npm packages have one version
+        run: node scripts/set-version.mjs --check
+      - uses: mlugg/setup-zig@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Build the executable into its platform package
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          node scripts/build-target.mjs x86_64-unknown-linux-musl
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Builds the packages in dependency order, then the vite example with them
+      - name: Build packages and example
+        run: pnpm run build
+      - name: Check the example output
+        run: test -s examples/vite/dist/rootsqz-output/index.html

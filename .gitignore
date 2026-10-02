@@ -3,3 +3,8 @@ target/
 out/
 testout/
 .DS_Store
+node_modules/
+dist/
+# Executables built by scripts/build-target.mjs
+npm/*/bin/
+npm/*/LICENSE

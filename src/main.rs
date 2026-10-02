@@ -26,7 +26,7 @@ enum Commands {
 fn main() -> Result<()> {
     setup_panic!(
         Metadata::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
-            .support("https://github.com/r00tkids/websqz/issues")
+            .support("https://github.com/r00tkids/rootsqz/issues")
     );
 
     tracing_subscriber::registry()

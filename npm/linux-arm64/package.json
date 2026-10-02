@@ -1,0 +1,23 @@
+{
+  "name": "@rootkids/rootsqz-linux-arm64",
+  "version": "0.4.1",
+  "description": "The aarch64-unknown-linux-musl executable of rootsqz.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r00tkids/rootsqz.git",
+    "directory": "npm/linux-arm64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

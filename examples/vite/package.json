@@ -1,0 +1,16 @@
+{
+  "name": "rootsqz-example-vite",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@rootkids/rollup-plugin-rootsqz": "workspace:*",
+    "module-from-string": "^3.3.1",
+    "vite": "^7.3.1",
+    "vite-plugin-glsl": "^1.5.5"
+  }
+}
