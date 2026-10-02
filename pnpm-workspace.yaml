@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+  - npm/*
+  - examples/vite
+
+allowBuilds:
+  esbuild: true

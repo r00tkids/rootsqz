@@ -1,0 +1,12 @@
+{
+  "name": "rootsqz-workspace",
+  "version": "0.4.1",
+  "private": true,
+  "packageManager": "pnpm@12.8.1",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "build:binary": "node scripts/build-target.mjs",
+    "example": "pnpm --filter rootsqz-example-vite run build",
+    "set-version": "node scripts/set-version.mjs"
+  }
+}
