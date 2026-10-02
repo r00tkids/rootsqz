@@ -510,17 +510,44 @@ fn encode_compressed_data<T: Write>(writer: &mut T, encoded_data: &[u8]) -> Resu
     Ok(())
 }
 
-fn uglify_src(text: &str) -> Result<String> {
-    let child = Command::new("uglifyjs")
+/// Builds the command that runs UglifyJS.
+///
+/// `ROOTSQZ_UGLIFYJS` names the program to run instead of `uglifyjs` from PATH.
+/// If `ROOTSQZ_NODE` is set as well, `ROOTSQZ_UGLIFYJS` is a script run by that node executable.
+/// The npm package sets both to use its own uglify-js dependency.
+fn uglify_command(default_program: &str) -> Command {
+    match std::env::var_os("ROOTSQZ_UGLIFYJS") {
+        Some(uglifyjs) => match std::env::var_os("ROOTSQZ_NODE") {
+            Some(node) => {
+                let mut command = Command::new(node);
+                command.arg(uglifyjs);
+                command
+            }
+            None => Command::new(uglifyjs),
+        },
+        None => Command::new(default_program),
+    }
+}
+
+fn spawn_uglify(default_program: &str) -> std::io::Result<std::process::Child> {
+    uglify_command(default_program)
         .arg("--compress")
         .arg("--mangle")
         .arg("--toplevel")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .context(
-            "Failed to run uglifyjs. Run 'npm install -g uglify-js' to install it globally.",
-        )?;
+}
+
+fn uglify_src(text: &str) -> Result<String> {
+    let mut spawned = spawn_uglify("uglifyjs");
+    // npm installs uglifyjs as a .cmd shim on Windows, which is not found without the extension
+    if cfg!(windows) && matches!(&spawned, Err(err) if err.kind() == std::io::ErrorKind::NotFound) {
+        spawned = spawn_uglify("uglifyjs.cmd");
+    }
+    let child = spawned.context(
+        "Failed to run uglifyjs. Run 'npm install -g uglify-js' to install it globally, or set ROOTSQZ_UGLIFYJS.",
+    )?;
 
     child
         .stdin
