@@ -44,6 +44,40 @@ type RootSqzOptions = {
   rootsqzPath?: string;
 
   /**
+   * Embedded compression preset (`--size-profile`). The executable defaults to `4k`;
+   * `64k` adds a bounded match predictor for larger JavaScript inputs.
+   */
+  sizeProfile?: "4k" | "64k";
+
+  /**
+   * Pack the output as a Brotli stream decoded with `DecompressionStream('brotli')` (`--brotli`).
+   * Cannot be combined with `config`, `report` or the `64k` size profile.
+   */
+  brotli?: boolean;
+
+  /**
+   * Path to a complete JSON compression config (`--config`). Takes precedence over `sizeProfile`.
+   */
+  config?: string;
+
+  /**
+   * Write a detailed compression report next to the output (`--report`).
+   */
+  report?: boolean;
+
+  /**
+   * Name of the global that the boot code of the executable puts the files in.
+   * By default it follows the version the executable reports:
+   * `wsqz` up to 0.4.0, `rsqz` from 0.4.1.
+   */
+  runtimeGlobal?: string;
+
+  /**
+   * Further arguments passed to the executable as they are.
+   */
+  rootsqzArgs?: string[];
+
+  /**
    * File transform hooks to process files before they are imported in code or compressed by rootsqz
    */
   fileTransforms?: [
@@ -60,6 +94,11 @@ type RootSqzCliOptions = {
   files: string[];
   preCompressedFiles: string[];
   output: string;
+  sizeProfile?: "4k" | "64k";
+  brotli?: boolean;
+  config?: string;
+  report?: boolean;
+  extraArgs: string[];
 }
 
 class RootSqzExe {
@@ -81,6 +120,20 @@ class RootSqzExe {
     }
 
     args.push("--output-directory", cliOptions.output);
+
+    if (cliOptions.config) {
+      args.push("--config", cliOptions.config);
+    }
+    if (cliOptions.sizeProfile) {
+      args.push("--size-profile", cliOptions.sizeProfile);
+    }
+    if (cliOptions.brotli) {
+      args.push("--brotli");
+    }
+    if (cliOptions.report) {
+      args.push("--report");
+    }
+    args.push(...cliOptions.extraArgs);
 
     const spawn = await child_process.spawn(this.rootsqzPath, args, {
       stdio: "inherit",
@@ -120,9 +173,34 @@ function rootsqzExecutablePath(executablePath: string | undefined): string {
   return executablePath;
 }
 
+/**
+ * The boot code of the executable names its global `wsqz` up to 0.4.0
+ * and `rsqz` from 0.4.1.
+ */
+function detectRuntimeGlobal(executablePath: string): string {
+  try {
+    const out = child_process.execFileSync(executablePath, ["--version"], { encoding: "utf-8" });
+    const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(out);
+    if (m) {
+      const [major, minor, patch] = [m[1], m[2], m[3] ?? "0"].map(Number);
+      if (major === 0 && (minor < 4 || (minor === 4 && patch < 1))) {
+        return "wsqz";
+      }
+    }
+  } catch {
+    // Not runnable now, the build reports that when it runs the executable
+  }
+  return "rsqz";
+}
+
 export default function (options: RootSqzOptions = {}): Plugin {
+  if (options.brotli && (options.config || options.report || options.sizeProfile === "64k")) {
+    throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
+  }
+
   const isBuild = process.env.NODE_ENV === "production";
   const rootsqzExePath = rootsqzExecutablePath(options.rootsqzPath);
+  const runtimeGlobal = options.runtimeGlobal ?? (isBuild ? detectRuntimeGlobal(rootsqzExePath) : "rsqz");
   const rootsqzExe = new RootSqzExe(rootsqzExePath);
 
   const fileTransforms = options.fileTransforms?.map(transform => {
@@ -172,8 +250,8 @@ export default function (options: RootSqzOptions = {}): Plugin {
 
       return {
         code: hookRes.isText 
-          ? `export default new TextDecoder().decode(wsqz.files["${fileName}"]);` 
-          : `export default wsqz.files["${fileName}"];`,
+          ? `export default new TextDecoder().decode(${runtimeGlobal}.files["${fileName}"]);` 
+          : `export default ${runtimeGlobal}.files["${fileName}"];`,
         moduleSideEffects: false,
         moduleType: 'js',
       };
@@ -303,6 +381,11 @@ export default function (options: RootSqzOptions = {}): Plugin {
             outputOptions.dir || "",
             "rootsqz-output",
           ),
+          sizeProfile: options.sizeProfile,
+          brotli: options.brotli,
+          config: options.config,
+          report: options.report,
+          extraArgs: options.rootsqzArgs ?? [],
         });
 
         const relOutPath = path.relative(".", path.resolve(outputOptions.dir || "", "rootsqz-output"));
