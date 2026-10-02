@@ -85,6 +85,17 @@ pnpm run build                  # build the packages and the vite example
 
 The crate and all npm packages have the same version. Set it with `node scripts/set-version.mjs <version>`.
 
+### Releasing
+```sh
+node scripts/set-version.mjs 0.5.0
+git commit -am "Release 0.5.0"
+git tag v0.5.0
+git push origin main v0.5.0
+```
+The tag starts the release workflow. It builds the executables for all targets, creates the GitHub release and publishes the npm packages. The tag must be `v` followed by the full version, otherwise nothing is published to npm. A version with a prerelease part, e.g. `0.5.0-rc.1`, is published under the npm tag `next`.
+
+Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): each package names this repository and `release.yml` as its trusted publisher on npmjs.com. A package that does not exist on npm yet cannot have one, so its first version needs the repository secret `NPM_TOKEN`, or a manual `npm publish`.
+
 ## TODO
 - [ ] Support larger hashmaps (>256 MiB)
 - [ ] Add support for custom loading bar JS hook

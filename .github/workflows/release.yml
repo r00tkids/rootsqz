@@ -88,3 +88,85 @@ jobs:
           name: Release ${{ github.ref_name }}
           files: assets/*
           fail_on_unmatched_files: true
+  publish-npm:
+    needs: build
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # For npm trusted publishing (OIDC)
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: Check that the tag is the version of the packages
+        run: |
+          node scripts/set-version.mjs --check
+          version=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match the version $version; expected the tag v$version"
+            exit 1
+          fi
+      - name: Download Artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: rootsqz-*
+          path: bin
+          merge-multiple: false
+      - name: Put the executables into their platform packages
+        run: |
+          while read -r platform target; do
+            mkdir -p "npm/$platform/bin"
+            cp bin/rootsqz-$target/rootsqz* "npm/$platform/bin/"
+            # Artifacts do not keep the file mode
+            chmod 755 npm/$platform/bin/*
+            cp LICENSE "npm/$platform/LICENSE"
+          done <<'TARGETS'
+          darwin-arm64 aarch64-apple-darwin
+          darwin-x64 x86_64-apple-darwin
+          linux-arm64 aarch64-unknown-linux-musl
+          linux-x64 x86_64-unknown-linux-musl
+          win32-x64 x86_64-pc-windows-msvc
+          TARGETS
+          ls -l npm/*/bin
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build packages
+        run: pnpm --filter "./packages/*" run build
+      # pnpm pack replaces the workspace: dependencies by the version
+      - name: Pack
+        run: |
+          mkdir tarballs
+          for dir in npm/* packages/*; do
+            (cd "$dir" && pnpm pack --pack-destination "$GITHUB_WORKSPACE/tarballs")
+          done
+          ls -l tarballs
+      # The platform packages go first, so @rootkids/rootsqz is never published without them.
+      # Packages that are published already are skipped, so a failed run can be repeated.
+      - name: Publish
+        env:
+          # Only needed until the packages have a trusted publisher on npm
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Trusted publishing needs npm 11.5.1 or later
+          npm install -g npm@latest
+          version=$(node -p "require('./package.json').version")
+          case "$version" in
+            *-*) tag=next ;;
+            *) tag=latest ;;
+          esac
+          for name in \
+            rootsqz-darwin-arm64 rootsqz-darwin-x64 rootsqz-linux-arm64 rootsqz-linux-x64 rootsqz-win32-x64 \
+            rootsqz rollup-plugin-rootsqz
+          do
+            if npm view "@rootkids/$name@$version" version >/dev/null 2>&1; then
+              echo "@rootkids/$name@$version is published already"
+            else
+              npm publish "tarballs/rootkids-$name-$version.tgz" --access public --tag "$tag"
+            fi
+          done
