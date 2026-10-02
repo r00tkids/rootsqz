@@ -15,6 +15,10 @@ export default defineConfig({
     },
     plugins: [
         rootsqz({
+            // Set ROOTSQZ_PATH to use a locally built executable, e.g. ../../target/release/websqz
+            rootsqzPath: process.env.ROOTSQZ_PATH,
+            sizeProfile: process.env.ROOTSQZ_SIZE_PROFILE,
+            brotli: process.env.ROOTSQZ_BROTLI === "1",
             fileTransforms: [
                 {
                     include: [/\.glsl$/, /\.frag$/, /\.vert$/],
