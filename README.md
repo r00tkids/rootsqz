@@ -94,7 +94,7 @@ git push origin main v0.5.0
 ```
 The tag starts the release workflow. It builds the executables for all targets, creates the GitHub release and publishes the npm packages. The tag must be `v` followed by the full version, otherwise nothing is published to npm. A version with a prerelease part, e.g. `0.5.0-rc.1`, is published under the npm tag `next`.
 
-Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): each package names this repository and `release.yml` as its trusted publisher on npmjs.com. A package that does not exist on npm yet cannot have one, so its first version needs the repository secret `NPM_TOKEN`, or a manual `npm publish`.
+Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): each package names this repository and `release.yml` as its trusted publisher on npmjs.com, so no npm token is stored. A new package cannot have a trusted publisher before it exists, so its first version needs a token (as the repository secret `NPM_TOKEN`, passed to the publish step as `NODE_AUTH_TOKEN`) or a manual `npm publish`. Afterwards, configure its trusted publisher with `npm trust github @r00tkids/<name> --file release.yml --repo r00tkids/rootsqz --allow-publish` and remove the token again.
 
 ## TODO
 - [ ] Support larger hashmaps (>256 MiB)

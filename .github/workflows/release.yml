@@ -148,10 +148,8 @@ jobs:
           ls -l tarballs
       # The platform packages go first, so @r00tkids/rootsqz is never published without them.
       # Packages that are published already are skipped, so a failed run can be repeated.
+      # Authenticates with npm trusted publishing (OIDC), no token
       - name: Publish
-        env:
-          # Only needed until the packages have a trusted publisher on npm
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           # Trusted publishing needs npm 11.5.1 or later
           npm install -g npm@latest
