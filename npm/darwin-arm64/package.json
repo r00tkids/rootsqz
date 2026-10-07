@@ -1,0 +1,23 @@
+{
+  "name": "@r00tkids/rootsqz-darwin-arm64",
+  "version": "0.4.1",
+  "description": "The aarch64-apple-darwin executable of rootsqz.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r00tkids/rootsqz.git",
+    "directory": "npm/darwin-arm64"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

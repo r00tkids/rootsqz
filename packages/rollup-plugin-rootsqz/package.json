@@ -1,0 +1,47 @@
+{
+  "name": "@r00tkids/rollup-plugin-rootsqz",
+  "version": "0.4.1",
+  "type": "module",
+  "description": "Rollup / Vite plugin that compresses and bundles code and assets into one HTML file with rootsqz.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/index.d.ts"
+  ],
+  "scripts": {
+    "build": "rollup -c && tsc --emitDeclarationOnly",
+    "build:watch": "rollup -c -w",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "rollup-plugin",
+    "vite-plugin",
+    "rootsqz",
+    "compression"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r00tkids/rootsqz.git",
+    "directory": "packages/rollup-plugin-rootsqz"
+  },
+  "dependencies": {
+    "@rollup/pluginutils": "^5.3.0",
+    "@r00tkids/rootsqz": "workspace:*",
+    "tslib": "^2.8.1"
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@tsconfig/node22": "^22.0.5",
+    "@types/node": "^26.0.0",
+    "rollup": "^4.55.3",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

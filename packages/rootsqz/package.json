@@ -1,0 +1,57 @@
+{
+  "name": "@r00tkids/rootsqz",
+  "version": "0.4.1",
+  "type": "module",
+  "description": "Compresses and packs JavaScript and assets into one HTML file, for demoscene intros and size restricted challenges.",
+  "bin": {
+    "rootsqz": "./bin/rootsqz.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "rootsqz",
+    "compression",
+    "demoscene"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r00tkids/rootsqz.git",
+    "directory": "packages/rootsqz"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "uglify-js": "^3.19.3"
+  },
+  "optionalDependencies": {
+    "@r00tkids/rootsqz-darwin-arm64": "workspace:*",
+    "@r00tkids/rootsqz-darwin-x64": "workspace:*",
+    "@r00tkids/rootsqz-linux-arm64": "workspace:*",
+    "@r00tkids/rootsqz-linux-x64": "workspace:*",
+    "@r00tkids/rootsqz-win32-x64": "workspace:*"
+  },
+  "devDependencies": {
+    "@tsconfig/node22": "^22.0.5",
+    "@types/node": "^26.0.0",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
