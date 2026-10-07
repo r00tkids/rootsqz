@@ -23,7 +23,8 @@ function packageJsonFiles() {
 
 // The first version line of Cargo.toml is the one of [package]
 const CARGO_TOML_VERSION = /^version = "(.+)"$/m;
-const CARGO_LOCK_VERSION = /(\[\[package\]\]\nname = "rootsqz"\nversion = ")(.+)(")/;
+// Line endings are CRLF in a Windows checkout
+const CARGO_LOCK_VERSION = /(\[\[package\]\]\r?\nname = "rootsqz"\r?\nversion = ")(.+?)(")/;
 
 function read(file) {
   return fs.readFileSync(path.join(root, file), "utf-8");
