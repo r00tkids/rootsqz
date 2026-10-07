@@ -1,18 +1,18 @@
-# @rootkids/rollup-plugin-rootsqz
-![NPM Version](https://img.shields.io/npm/v/%40rootkids%2Frollup-plugin-rootsqz)
+# @r00tkids/rollup-plugin-rootsqz
+![NPM Version](https://img.shields.io/npm/v/%40r00tkids%2Frollup-plugin-rootsqz)
 
 Rollup / Vite plugin for using [rootsqz](https://github.com/r00tkids/rootsqz) to compress and bundle code and assets into one HTML file. This is intented for intros in the [demoscene](https://en.wikipedia.org/wiki/Demoscene) or size restricted JS challenges.
 
 ## Install
-`npm i -D @rootkids/rollup-plugin-rootsqz`
+`npm i -D @r00tkids/rollup-plugin-rootsqz`
 
-This installs the rootsqz executable for your platform through [`@rootkids/rootsqz`](https://www.npmjs.com/package/@rootkids/rootsqz). The plugin and the executable share one version.
+This installs the rootsqz executable for your platform through [`@r00tkids/rootsqz`](https://www.npmjs.com/package/@r00tkids/rootsqz). The plugin and the executable share one version.
 
 ## Usage
 ```js
 // vite.config.js
 import { defineConfig } from 'vite';
-import rootsqz from '@rootkids/rollup-plugin-rootsqz';
+import rootsqz from '@r00tkids/rollup-plugin-rootsqz';
 
 export default defineConfig({
   plugins: [rootsqz()]

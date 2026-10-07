@@ -1,5 +1,5 @@
 {
-  "name": "@rootkids/rootsqz-win32-x64",
+  "name": "@r00tkids/rootsqz-win32-x64",
   "version": "0.4.1",
   "description": "The x86_64-pc-windows-msvc executable of rootsqz.",
   "license": "MIT",

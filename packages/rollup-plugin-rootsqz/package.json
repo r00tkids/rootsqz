@@ -1,5 +1,5 @@
 {
-  "name": "@rootkids/rollup-plugin-rootsqz",
+  "name": "@r00tkids/rollup-plugin-rootsqz",
   "version": "0.4.1",
   "type": "module",
   "description": "Rollup / Vite plugin that compresses and bundles code and assets into one HTML file with rootsqz.",
@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@rollup/pluginutils": "^5.3.0",
-    "@rootkids/rootsqz": "workspace:*",
+    "@r00tkids/rootsqz": "workspace:*",
     "tslib": "^2.8.1"
   },
   "devDependencies": {

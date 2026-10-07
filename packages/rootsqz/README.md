@@ -1,12 +1,12 @@
-# @rootkids/rootsqz
-![NPM Version](https://img.shields.io/npm/v/%40rootkids%2Frootsqz)
+# @r00tkids/rootsqz
+![NPM Version](https://img.shields.io/npm/v/%40r00tkids%2Frootsqz)
 
 [rootsqz](https://github.com/r00tkids/rootsqz) compresses and packs JavaScript and assets into one HTML file. This is intended for intros in the [demoscene](https://en.wikipedia.org/wiki/Demoscene) or size restricted JS challenges.
 
-This package installs the `rootsqz` executable for your platform and a small Node API to run it. For Rollup and Vite, see [`@rootkids/rollup-plugin-rootsqz`](https://www.npmjs.com/package/@rootkids/rollup-plugin-rootsqz).
+This package installs the `rootsqz` executable for your platform and a small Node API to run it. For Rollup and Vite, see [`@r00tkids/rollup-plugin-rootsqz`](https://www.npmjs.com/package/@r00tkids/rollup-plugin-rootsqz).
 
 ## Install
-`npm i -D @rootkids/rootsqz`
+`npm i -D @r00tkids/rootsqz`
 
 Prebuilt executables exist for macOS (arm64, x64), Linux (arm64, x64) and Windows (x64). They are optional dependencies, so do not install with `--omit=optional`.
 
@@ -19,7 +19,7 @@ See `npx rootsqz --help` and the [rootsqz README](https://github.com/r00tkids/ro
 
 ## Node API
 ```js
-import { compress } from '@rootkids/rootsqz';
+import { compress } from '@r00tkids/rootsqz';
 
 await compress({
     jsMain: 'index.js',

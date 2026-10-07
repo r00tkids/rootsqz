@@ -13,11 +13,11 @@ export const RUNTIME_GLOBAL = "rsqz";
  * Packages that hold the executable, by `<process.platform>-<process.arch>`.
  */
 const PLATFORM_PACKAGES: Record<string, string> = {
-  "darwin-arm64": "@rootkids/rootsqz-darwin-arm64",
-  "darwin-x64": "@rootkids/rootsqz-darwin-x64",
-  "linux-arm64": "@rootkids/rootsqz-linux-arm64",
-  "linux-x64": "@rootkids/rootsqz-linux-x64",
-  "win32-x64": "@rootkids/rootsqz-win32-x64",
+  "darwin-arm64": "@r00tkids/rootsqz-darwin-arm64",
+  "darwin-x64": "@r00tkids/rootsqz-darwin-x64",
+  "linux-arm64": "@r00tkids/rootsqz-linux-arm64",
+  "linux-x64": "@r00tkids/rootsqz-linux-x64",
+  "win32-x64": "@r00tkids/rootsqz-win32-x64",
 };
 
 /**
@@ -42,7 +42,7 @@ export function binaryPath(): string {
     return require.resolve(`${platformPackage}/bin/${executable}`);
   } catch {
     throw new Error(
-      `The package ${platformPackage} with the rootsqz executable is not installed. It is an optional dependency of @rootkids/rootsqz, so install without omitting optional dependencies, or set ROOTSQZ_BINARY_PATH to an executable.`,
+      `The package ${platformPackage} with the rootsqz executable is not installed. It is an optional dependency of @r00tkids/rootsqz, so install without omitting optional dependencies, or set ROOTSQZ_BINARY_PATH to an executable.`,
     );
   }
 }

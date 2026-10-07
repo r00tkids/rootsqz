@@ -168,7 +168,7 @@ importers:
 
   examples/vite:
     devDependencies:
-      '@rootkids/rollup-plugin-rootsqz':
+      '@r00tkids/rollup-plugin-rootsqz':
         specifier: workspace:*
         version: link:../../packages/rollup-plugin-rootsqz
       module-from-string:
@@ -193,12 +193,12 @@ importers:
 
   packages/rollup-plugin-rootsqz:
     dependencies:
+      '@r00tkids/rootsqz':
+        specifier: workspace:*
+        version: link:../rootsqz
       '@rollup/pluginutils':
         specifier: ^5.3.0
         version: 5.4.0(rollup@4.63.6)
-      '@rootkids/rootsqz':
-        specifier: workspace:*
-        version: link:../rootsqz
       tslib:
         specifier: ^2.8.1
         version: 2.8.1
@@ -235,19 +235,19 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
     optionalDependencies:
-      '@rootkids/rootsqz-darwin-arm64':
+      '@r00tkids/rootsqz-darwin-arm64':
         specifier: workspace:*
         version: link:../../npm/darwin-arm64
-      '@rootkids/rootsqz-darwin-x64':
+      '@r00tkids/rootsqz-darwin-x64':
         specifier: workspace:*
         version: link:../../npm/darwin-x64
-      '@rootkids/rootsqz-linux-arm64':
+      '@r00tkids/rootsqz-linux-arm64':
         specifier: workspace:*
         version: link:../../npm/linux-arm64
-      '@rootkids/rootsqz-linux-x64':
+      '@r00tkids/rootsqz-linux-x64':
         specifier: workspace:*
         version: link:../../npm/linux-x64
-      '@rootkids/rootsqz-win32-x64':
+      '@r00tkids/rootsqz-win32-x64':
         specifier: workspace:*
         version: link:../../npm/win32-x64
 

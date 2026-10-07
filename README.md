@@ -12,7 +12,7 @@ Also see the rollup / Vite plugin in [rollup-plugin-rootsqz](packages/rollup-plu
 
 ### From npm
 ```sh
-npm install -D @rootkids/rootsqz
+npm install -D @r00tkids/rootsqz
 npx rootsqz --help
 ```
 This installs a prebuilt executable for macOS (arm64, x64), Linux (arm64, x64) or Windows (x64), and the UglifyJS it needs. The package also has a Node API, see [packages/rootsqz](packages/rootsqz).
@@ -70,9 +70,9 @@ The Rust crate is at the repository root. The npm packages are a [pnpm](https://
 
 | Path | Package |
 |---|---|
-| `packages/rootsqz` | `@rootkids/rootsqz`: `rootsqz` command and Node API, runs the executable |
-| `packages/rollup-plugin-rootsqz` | `@rootkids/rollup-plugin-rootsqz` |
-| `npm/<platform>` | `@rootkids/rootsqz-<platform>`: the executable for one platform |
+| `packages/rootsqz` | `@r00tkids/rootsqz`: `rootsqz` command and Node API, runs the executable |
+| `packages/rollup-plugin-rootsqz` | `@r00tkids/rollup-plugin-rootsqz` |
+| `npm/<platform>` | `@r00tkids/rootsqz-<platform>`: the executable for one platform |
 | `examples/vite` | Example project for the plugin |
 
 ```sh

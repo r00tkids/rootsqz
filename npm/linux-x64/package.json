@@ -1,5 +1,5 @@
 {
-  "name": "@rootkids/rootsqz-linux-x64",
+  "name": "@r00tkids/rootsqz-linux-x64",
   "version": "0.4.1",
   "description": "The x86_64-unknown-linux-musl executable of rootsqz.",
   "license": "MIT",

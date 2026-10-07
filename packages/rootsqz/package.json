@@ -1,5 +1,5 @@
 {
-  "name": "@rootkids/rootsqz",
+  "name": "@r00tkids/rootsqz",
   "version": "0.4.1",
   "type": "module",
   "description": "Compresses and packs JavaScript and assets into one HTML file, for demoscene intros and size restricted challenges.",
@@ -40,11 +40,11 @@
     "uglify-js": "^3.19.3"
   },
   "optionalDependencies": {
-    "@rootkids/rootsqz-darwin-arm64": "workspace:*",
-    "@rootkids/rootsqz-darwin-x64": "workspace:*",
-    "@rootkids/rootsqz-linux-arm64": "workspace:*",
-    "@rootkids/rootsqz-linux-x64": "workspace:*",
-    "@rootkids/rootsqz-win32-x64": "workspace:*"
+    "@r00tkids/rootsqz-darwin-arm64": "workspace:*",
+    "@r00tkids/rootsqz-darwin-x64": "workspace:*",
+    "@r00tkids/rootsqz-linux-arm64": "workspace:*",
+    "@r00tkids/rootsqz-linux-x64": "workspace:*",
+    "@r00tkids/rootsqz-win32-x64": "workspace:*"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.5",

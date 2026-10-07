@@ -3,7 +3,7 @@ import querystring from "node:querystring";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createFilter, FilterPattern } from "@rollup/pluginutils";
-import { compress, RUNTIME_GLOBAL } from "@rootkids/rootsqz";
+import { compress, RUNTIME_GLOBAL } from "@r00tkids/rootsqz";
 
 type RootSqzFile = {
   fileName: string;
@@ -41,7 +41,7 @@ export type RootsqzFileTransformRes = {
 
 type RootSqzOptions = {
   /**
-   * Path of the rootsqz executable. By default the one installed with `@rootkids/rootsqz`,
+   * Path of the rootsqz executable. By default the one installed with `@r00tkids/rootsqz`,
    * or the one named by the environment variable `ROOTSQZ_BINARY_PATH`.
    */
   rootsqzPath?: string;

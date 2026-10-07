@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import glsl from 'vite-plugin-glsl';
-import rootsqz from '@rootkids/rollup-plugin-rootsqz';
+import rootsqz from '@r00tkids/rollup-plugin-rootsqz';
 import { importFromString } from 'module-from-string';
 
 let glslPlugin = glsl({ minify: true });
