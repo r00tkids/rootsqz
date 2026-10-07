@@ -167,6 +167,6 @@ jobs:
             if npm view "@r00tkids/$name@$version" version >/dev/null 2>&1; then
               echo "@r00tkids/$name@$version is published already"
             else
-              npm publish "tarballs/r00tkids-$name-$version.tgz" --access public --tag "$tag"
+              npm publish "./tarballs/r00tkids-$name-$version.tgz" --access public --tag "$tag"
             fi
           done
