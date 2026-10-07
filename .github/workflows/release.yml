@@ -57,8 +57,10 @@ jobs:
           path: npm/${{ matrix.platform }}/bin/
           if-no-files-found: error
           retention-days: 2
+  # The GitHub release waits for npm: a version on npm cannot be published again,
+  # while a release can be deleted and created again.
   release:
-    needs: build
+    needs: [build, publish-npm]
     name: Create Release
     runs-on: ubuntu-latest
     permissions:
