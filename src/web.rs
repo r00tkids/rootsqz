@@ -23,13 +23,14 @@ pub struct Args {
     #[arg(short, long)]
     pub js_main: String,
 
-    /// Files to be included and packed into the output, with compression.
+    /// File to be included and packed into the output, with compression. Can be given multiple times.
     /// Order matters, so files of similar content should be ordered together.
-    #[arg(short, long, value_delimiter = ',')]
+    #[arg(short, long = "file", value_name = "FILE")]
     pub files: Vec<String>,
 
-    /// Files to be included and packed into the output, without compression
-    #[arg(short, long, value_delimiter = ',')]
+    /// File that is already compressed, included and packed into the output as it is.
+    /// Can be given multiple times.
+    #[arg(short = 'p', long = "precompressed", value_name = "FILE")]
     pub pre_compressed_files: Vec<String>,
 
     /// Output directory

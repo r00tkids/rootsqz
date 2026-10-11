@@ -130,13 +130,13 @@ export type CompressOptions = RunOptions & {
   outputDirectory: string;
 
   /**
-   * Files to pack with compression (`--files`).
+   * Files to pack with compression (`--file`).
    * The order matters, files of similar content should follow each other.
    */
   files?: string[];
 
   /**
-   * Files to pack without compression, e.g. JPEG (`--pre-compressed-files`).
+   * Files to pack without compression, e.g. JPEG (`--precompressed`).
    */
   preCompressedFiles?: string[];
 
@@ -186,10 +186,10 @@ export function compressArgs(options: CompressOptions): string[] {
   const args: string[] = ["--js-main", options.jsMain];
 
   for (const file of options.files ?? []) {
-    args.push("--files", file);
+    args.push("--file", file);
   }
   for (const preCompressedFile of options.preCompressedFiles ?? []) {
-    args.push("--pre-compressed-files", preCompressedFile);
+    args.push("--precompressed", preCompressedFile);
   }
 
   args.push("--output-directory", options.outputDirectory);

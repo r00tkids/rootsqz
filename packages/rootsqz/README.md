@@ -12,7 +12,7 @@ Prebuilt executables exist for macOS (arm64, x64), Linux (arm64, x64) and Window
 
 ## Command line
 ```sh
-npx rootsqz --js-main index.js --files shader.glsl --output-directory out
+npx rootsqz --js-main index.js --file shader.glsl --output-directory out
 ```
 
 See `npx rootsqz --help` and the [rootsqz README](https://github.com/r00tkids/rootsqz#usage) for the options.
