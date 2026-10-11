@@ -23,6 +23,8 @@ const PLATFORM_PACKAGES: Record<string, string> = {
 /**
  * Path of the rootsqz executable for this platform.
  * The environment variable `ROOTSQZ_BINARY_PATH` takes precedence over the installed platform package.
+ *
+ * @throws If there is no prebuilt executable for this platform, or its package is not installed.
  */
 export function binaryPath(): string {
   if (process.env.ROOTSQZ_BINARY_PATH) {
@@ -50,6 +52,8 @@ export function binaryPath(): string {
 /**
  * Environment for the executable. It points the executable to the uglify-js of this package,
  * unless `ROOTSQZ_UGLIFYJS` is set already.
+ *
+ * @param env Environment to extend. By default `process.env`.
  */
 export function toolEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   if (env.ROOTSQZ_UGLIFYJS) {
@@ -86,6 +90,9 @@ export type RunOptions = {
 /**
  * Runs the rootsqz executable with the given command line arguments.
  * Rejects if it cannot be started or exits with a code other than 0.
+ *
+ * @param args Command line arguments of the executable.
+ * @param options Executable, working directory and standard streams.
  */
 export function run(args: string[], options: RunOptions = {}): Promise<void> {
   const executable = options.binaryPath ?? binaryPath();
@@ -168,6 +175,8 @@ export type CompressOptions = RunOptions & {
 
 /**
  * Command line arguments of the executable for the given options.
+ *
+ * @throws If `brotli` is combined with `config`, `report` or the `64k` size profile.
  */
 export function compressArgs(options: CompressOptions): string[] {
   if (options.brotli && (options.config || options.report || options.sizeProfile === "64k")) {
@@ -207,6 +216,9 @@ export function compressArgs(options: CompressOptions): string[] {
 
 /**
  * Packs and compresses a JavaScript file and further files into the output directory.
+ * Rejects if the executable cannot be started or exits with a code other than 0.
+ *
+ * @throws If `brotli` is combined with `config`, `report` or the `64k` size profile.
  */
 export function compress(options: CompressOptions): Promise<void> {
   return run(compressArgs(options), options);

@@ -9,10 +9,29 @@ import { compress, RUNTIME_GLOBAL } from "@r00tkids/rootsqz";
  * A file that is passed to rootsqz next to the JavaScript bundle.
  */
 type RootSqzFile = {
+  /**
+   * Short generated name that the file has in the output.
+   */
   fileName: string;
+
+  /**
+   * Content to pack.
+   */
   content: Buffer;
+
+  /**
+   * Is already compressed and is packed without compression.
+   */
   isCompressed: boolean;
+
+  /**
+   * File extension including the dot, used to order the files.
+   */
   fileExt: string;
+
+  /**
+   * Is it text? The import then gives a string instead of an `Uint8Array`.
+   */
   isText: boolean;
 };
 
@@ -106,6 +125,10 @@ type RootSqzOptions = {
       /**
        * Returns the content to pack for the module `id`, given the content of its file.
        * If it returns nothing, the next matching transform is tried.
+       *
+       * @param ctx Rollup plugin context of the `load` hook.
+       * @param id Module id, including its query parameters.
+       * @param content Content of the file on disk.
        */
       transform: (ctx: PluginContext, id: string, content: Buffer) => Promise<RootsqzFileTransformRes>;
     }
@@ -115,6 +138,10 @@ type RootSqzOptions = {
 /**
  * Rollup / Vite plugin that packs the bundle and the imported files into one HTML file with rootsqz.
  * It only compresses when `NODE_ENV` is `production`, otherwise it inlines the imported files.
+ *
+ * @param options Options of the plugin.
+ * @returns The plugin, for the `plugins` array of the Rollup or Vite config.
+ * @throws If `brotli` is combined with `config`, `report` or the `64k` size profile.
  */
 export default function (options: RootSqzOptions = {}): Plugin {
   if (options.brotli && (options.config || options.report || options.sizeProfile === "64k")) {
