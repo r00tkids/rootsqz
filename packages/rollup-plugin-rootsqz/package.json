@@ -1,6 +1,6 @@
 {
   "name": "@r00tkids/rollup-plugin-rootsqz",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "type": "module",
   "description": "Rollup / Vite plugin that compresses and bundles code and assets into one HTML file with rootsqz.",
   "main": "./dist/index.js",
