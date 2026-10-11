@@ -49,8 +49,8 @@ default for browser compatibility.
 
 Options:
 - `--js-main <file>`: Entry point JavaScript file
-- `--files <FILES>`: Extra files to be compressed. Order matters, so files of similar content should be ordered together.
-- `--pre-compressed-files <FILES>`: Extra files that are already compressed (jpeg, mp4 etc.)
+- `--file <FILE>`, `-f`: Extra file to be compressed. Repeat the option for each file. Order matters, so files of similar content should be ordered together.
+- `--pre-compressed-file <FILE>`, `-p`: Extra file that is already compressed (jpeg, mp4 etc.) and is stored as it is. Repeat the option for each file.
 - `--output-directory <dir>`: Output directory for compressed files
 - `--size-profile <4k|64k>`: Embedded compression preset (default: `4k`). The `64k` preset adds a bounded match predictor for larger JavaScript inputs.
 - `--brotli`: Use native Brotli decoding for web inputs (Firefox 147+ / Safari 18.4+).
@@ -60,7 +60,7 @@ Options:
 Both presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json) or [the 64k preset](src/compressor/size_64k_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, and `{"type":"IndirectByte","context_bytes":2,"max_count":15}`. The decoder is generated from the selected config.
 
 ## Runtime API
-To access the contents of files specified with `--files` or `--pre-compressed-files`, use `rsqz.files["<FILENAME>"]`.
+To access the contents of files specified with `--file` or `--pre-compressed-file`, use `rsqz.files["<FILENAME>"]`.
 `rsqz.files["<FILENAME>"]` returns an `Uint8Array`, to read it as text use `new TextDecoder().decode(rsqz.files["example.glsl"])`.
 
 Note: `<FILENAME>` refers to the base name of the file, not its full or relative path.
@@ -89,9 +89,9 @@ export default defineConfig({
 
 Import assets with a query parameter to have them compressed with the code:
 ```js
-import text from "./assets/test.json?rootsqz-txt&raw";         // string
-import data from "./assets/rand.bin?rootsqz-bin";              // Uint8Array
-import image from "./assets/logo.jpg?rootsqz-bin&compressed";  // already compressed, stored as it is
+import text from "./assets/test.json?rootsqz-txt&raw";             // string
+import data from "./assets/rand.bin?rootsqz-bin";                  // Uint8Array
+import image from "./assets/logo.jpg?rootsqz-bin&pre-compressed";  // already compressed, stored as it is
 ```
 The plugin orders the files by type and extension for a better compression ratio. For other file types, e.g. minified shaders, use the `fileTransforms` option.
 

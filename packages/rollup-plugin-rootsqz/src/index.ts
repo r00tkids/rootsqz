@@ -256,7 +256,13 @@ export default function (options: RootsqzOptions = {}): Plugin {
           );
         }
 
-        const isCompressed = parsed["compressed"] != null;
+        const isCompressed = parsed["pre-compressed"] != null;
+
+        if ((isRootSqzTxt || isRootSqzBin) && parsed["compressed"] != null) {
+          throw new Error(
+            `The "compressed" query parameter was renamed to "pre-compressed": ${id}`,
+          );
+        }
 
         if (isRootSqzTxt || isRootSqzBin) {
           const content = await loadFromDisk();
