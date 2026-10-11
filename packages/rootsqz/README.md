@@ -22,13 +22,29 @@ See `npx rootsqz --help` and the [rootsqz README](https://github.com/r00tkids/ro
 import { compress } from '@r00tkids/rootsqz';
 
 await compress({
+    /**
+     * JavaScript file that is evaluated after decompression.
+     */
     jsMain: 'index.js',
+
+    /**
+     * Directory that the output is written to.
+     */
     outputDirectory: 'out',
-    // Packed with compression. Files of similar content should follow each other.
+
+    /**
+     * Packed with compression. Files of similar content should follow each other.
+     */
     files: ['shader.glsl'],
-    // Packed without compression
+
+    /**
+     * Packed without compression
+     */
     preCompressedFiles: ['image.jpg'],
-    // "4k" (default) or "64k"
+
+    /**
+     * "4k" (default) or "64k"
+     */
     sizeProfile: '64k',
 });
 ```
