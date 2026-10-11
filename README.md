@@ -2,7 +2,7 @@
 rootsqz is a tool for compressing and decompressing demo intros for the web. The current overhead is about 1.6 KiB, so it's primarily intended for 64KiB intros, though this may change in the future. 
 It's inspired by [Crinkler](https://github.com/runestubbe/Crinkler) and ZPaq series of compressors.
 
-Also see the rollup / Vite plugin in [rollup-plugin-rootsqz](packages/rollup-plugin-rootsqz).
+There is also a [Vite / Rollup plugin](#vite--rollup-plugin).
 
 ## Features
 - High compression ratio for JavaScript and binary assets - about 20% better than deflate-raw
@@ -64,6 +64,53 @@ To access the contents of files specified with `--files` or `--pre-compressed-fi
 `rsqz.files["<FILENAME>"]` returns an `Uint8Array`, to read it as text use `new TextDecoder().decode(rsqz.files["example.glsl"])`.
 
 Note: `<FILENAME>` refers to the base name of the file, not its full or relative path.
+
+## Vite / Rollup plugin
+[`@r00tkids/rollup-plugin-rootsqz`](packages/rollup-plugin-rootsqz) runs rootsqz on the bundle, so a Vite or Rollup project builds straight to one compressed HTML file.
+
+```sh
+npm install -D @r00tkids/rollup-plugin-rootsqz
+```
+This also installs the rootsqz executable through `@r00tkids/rootsqz`.
+
+```js
+// vite.config.js
+import { defineConfig } from 'vite';
+import rootsqz from '@r00tkids/rollup-plugin-rootsqz';
+
+export default defineConfig({
+  build: {
+    // Disable module preloading for better compression results
+    modulePreload: false,
+  },
+  plugins: [rootsqz({ sizeProfile: "64k" })]
+});
+```
+
+Import assets with a query parameter to have them compressed with the code:
+```js
+import text from "./assets/test.json?rootsqz-txt&raw";         // string
+import data from "./assets/rand.bin?rootsqz-bin";              // Uint8Array
+import image from "./assets/logo.jpg?rootsqz-bin&compressed";  // already compressed, stored as it is
+```
+The plugin orders the files by type and extension for a better compression ratio. For other file types, e.g. minified shaders, use the `fileTransforms` option.
+
+With Vite, add `&raw` for file types that Vite processes itself, such as JSON and CSS. Without it the build fails.
+
+`vite build` writes the result to `rootsqz-output` in the output directory, e.g. `dist/rootsqz-output/index.html`. The dev server does not compress, it inlines the imported files instead.
+
+Notes:
+- The bundle must be a single JavaScript file. If the build fails because of several chunks, set `build.rollupOptions.output.inlineDynamicImports` to `true`.
+- The plugin only compresses when `NODE_ENV` is `production`. `vite build` sets this by default; with plain Rollup, set it yourself.
+- Only the JavaScript bundle and the files imported with `?rootsqz-txt` or `?rootsqz-bin` are packed. Markup in `index.html` and CSS imported with a plain `import "./style.css"` are not in the output. Create the elements from JavaScript, and import CSS as a string to add it yourself:
+  ```js
+  import css from "./style.css?inline";
+  document.head.appendChild(document.createElement("style")).textContent = css;
+  document.body.insertAdjacentHTML("beforeend", "<canvas id=c>");
+  ```
+- Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
+
+See the [plugin README](packages/rollup-plugin-rootsqz) for all options and [examples/vite](examples/vite) for a working project with `vite-plugin-glsl`.
 
 ## Development
 The Rust crate is at the repository root. The npm packages are a [pnpm](https://pnpm.io) workspace:
