@@ -67,7 +67,7 @@ export type RootsqzFileTransformRes = {
 /**
  * Options of the plugin.
  */
-type RootSqzOptions = {
+export type RootsqzOptions = {
   /**
    * Path of the rootsqz executable. By default the one installed with `@r00tkids/rootsqz`,
    * or the one named by the environment variable `ROOTSQZ_BINARY_PATH`.
@@ -143,7 +143,7 @@ type RootSqzOptions = {
  * @returns The plugin, for the `plugins` array of the Rollup or Vite config.
  * @throws If `brotli` is combined with `config`, `report` or the `64k` size profile.
  */
-export default function (options: RootSqzOptions = {}): Plugin {
+export default function (options: RootsqzOptions = {}): Plugin {
   if (options.brotli && (options.config || options.report || options.sizeProfile === "64k")) {
     throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
   }
