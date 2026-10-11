@@ -19,6 +19,21 @@ export default defineConfig({
 });
 ```
 
+Import assets with a query parameter to have them compressed with the code:
+```js
+import text from "./assets/test.json?rootsqz-txt";             // string
+import data from "./assets/rand.bin?rootsqz-bin";              // Uint8Array
+import image from "./assets/logo.jpg?rootsqz-bin&compressed";  // already compressed, stored as it is
+```
+The plugin orders the files by type and extension for a better compression ratio. For other file types, e.g. minified shaders, use the `fileTransforms` option.
+
+`vite build` writes the result to `rootsqz-output` in the output directory, e.g. `dist/rootsqz-output/index.html`. The dev server does not compress, it inlines the imported files instead.
+
+Notes:
+- The bundle must be a single JavaScript file. If the build fails because of several chunks, set `build.rollupOptions.output.inlineDynamicImports` to `true`.
+- The plugin only compresses when `NODE_ENV` is `production`. `vite build` sets this by default; with plain Rollup, set it yourself.
+- Setting `build.modulePreload` to `false` in the Vite config gives better compression results.
+
 See the [example](https://github.com/r00tkids/rootsqz/tree/main/examples/vite) for a working example with support for `vite-plugin-glsl`.
 
 ## Example Options
