@@ -10,6 +10,7 @@
   "devDependencies": {
     "@r00tkids/rollup-plugin-rootsqz": "workspace:*",
     "module-from-string": "^3.3.1",
+    "terser": "^5.51.2",
     "vite": "^7.3.1",
     "vite-plugin-glsl": "^1.5.5"
   }
