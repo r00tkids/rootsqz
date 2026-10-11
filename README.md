@@ -89,9 +89,9 @@ export default defineConfig({
 
 Import assets with a query parameter to have them compressed with the code:
 ```js
-import text from "./assets/test.json?rootsqz-txt&raw";         // string
-import data from "./assets/rand.bin?rootsqz-bin";              // Uint8Array
-import image from "./assets/logo.jpg?rootsqz-bin&compressed";  // already compressed, stored as it is
+import text from "./assets/test.json?rootsqz-txt&raw";            // string
+import data from "./assets/rand.bin?rootsqz-bin";                 // Uint8Array
+import image from "./assets/logo.jpg?rootsqz-bin&precompressed";  // already compressed, stored as it is
 ```
 The plugin orders the files by type and extension for a better compression ratio. For other file types, e.g. minified shaders, use the `fileTransforms` option.
 

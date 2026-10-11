@@ -1,4 +1,4 @@
-import rootsqzJpg from "./assets/rootsqz.jpg?rootsqz-bin&compressed&raw";
+import rootsqzJpg from "./assets/rootsqz.jpg?rootsqz-bin&precompressed&raw";
 import binary from "./assets/rand.bin?rootsqz-bin";
 import json from "./assets/test.json?rootsqz-txt&raw";
 import "./wasm-example.js";
