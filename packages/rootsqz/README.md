@@ -24,11 +24,17 @@ import { compress } from '@r00tkids/rootsqz';
 await compress({
     jsMain: 'index.js',
     outputDirectory: 'out',
-    // Packed with compression. Files of similar content should follow each other.
+    /**
+     * Packed with compression. Files of similar content should follow each other.
+     */
     files: ['shader.glsl'],
-    // Packed without compression
+    /**
+     * Packed without compression
+     */
     preCompressedFiles: ['image.jpg'],
-    // "4k" (default) or "64k"
+    /**
+     * "4k" (default) or "64k"
+     */
     sizeProfile: '64k',
 });
 ```

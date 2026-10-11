@@ -39,41 +39,48 @@ See the [example](https://github.com/r00tkids/rootsqz/tree/main/examples/vite) f
 ## Example Options
 ```js
 rootsqz({
-    /*
-    Full path to the rootsqz executable.
-    By default the plugin uses the executable installed with the npm package,
-    or the one named by the environment variable ROOTSQZ_BINARY_PATH.
-    */
+    /**
+     * Full path to the rootsqz executable.
+     * By default the plugin uses the executable installed with the npm package,
+     * or the one named by the environment variable ROOTSQZ_BINARY_PATH.
+     */
     rootsqzPath: undefined,
-    /*
-    Embedded compression preset, "4k" (default) or "64k".
-    The 64k preset adds a bounded match predictor for larger JavaScript inputs.
-    */
+
+    /**
+     * Embedded compression preset, "4k" (default) or "64k".
+     * The 64k preset adds a bounded match predictor for larger JavaScript inputs.
+     */
     sizeProfile: "64k",
-    /*
-    Pack the output as a Brotli stream that the browser decodes with
-    DecompressionStream('brotli') (Firefox 147+ / Safari 18.4+, not Chrome).
-    Cannot be combined with `config`, `report` or the 64k size profile.
-    */
+
+    /**
+     * Pack the output as a Brotli stream that the browser decodes with
+     * DecompressionStream('brotli') (Firefox 147+ / Safari 18.4+, not Chrome).
+     * Cannot be combined with `config`, `report` or the 64k size profile.
+     */
     brotli: false,
-    /*
-    Path to a complete JSON compression config.
-    Takes precedence over `sizeProfile`.
-    */
+
+    /**
+     * Path to a complete JSON compression config.
+     * Takes precedence over `sizeProfile`.
+     */
     config: undefined,
-    /*
-    Write a detailed compression report next to the output.
-    */
+
+    /**
+     * Write a detailed compression report next to the output.
+     */
     report: false,
-    /*
-    Name of the global that the boot code of the executable puts the files in.
-    By default `rsqz`. Set it to `wsqz` when `rootsqzPath` names an executable up to 0.4.0.
-    */
+
+    /**
+     * Name of the global that the boot code of the executable puts the files in.
+     * By default `rsqz`. Set it to `wsqz` when `rootsqzPath` names an executable up to 0.4.0.
+     */
     runtimeGlobal: undefined,
-    /*
-    Further arguments passed to the executable as they are.
-    */
+
+    /**
+     * Further arguments passed to the executable as they are.
+     */
     rootsqzArgs: [],
+
     fileTransforms: [
         {
             include: /\.glsl$/,
@@ -82,7 +89,10 @@ rootsqz({
                     content: Buffer.from("Hello World", "utf-8"),
                     isCompressed: false,
                     isText: true,
-                    fileExt: ".glsl" // Optional
+                    /**
+                     * Optional, by default taken from the file path.
+                     */
+                    fileExt: ".glsl"
                 };
             }
         }
