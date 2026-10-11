@@ -25,17 +25,27 @@ export default defineConfig({
 
 Import assets with a query parameter to have them compressed with the code:
 ```js
-import text from "./assets/test.json?rootsqz-txt";             // string
+import text from "./assets/test.json?rootsqz-txt&raw";         // string
 import data from "./assets/rand.bin?rootsqz-bin";              // Uint8Array
 import image from "./assets/logo.jpg?rootsqz-bin&compressed";  // already compressed, stored as it is
 ```
 The plugin orders the files by type and extension for a better compression ratio. For other file types, e.g. minified shaders, use the `fileTransforms` option.
+
+With Vite, add `&raw` for file types that Vite processes itself, such as JSON and CSS. Without it the build fails.
 
 `vite build` writes the result to `rootsqz-output` in the output directory, e.g. `dist/rootsqz-output/index.html`. The dev server does not compress, it inlines the imported files instead.
 
 Notes:
 - The bundle must be a single JavaScript file. If the build fails because of several chunks, set `build.rollupOptions.output.inlineDynamicImports` to `true`.
 - The plugin only compresses when `NODE_ENV` is `production`. `vite build` sets this by default; with plain Rollup, set it yourself.
+- Only the JavaScript bundle and the files imported with `?rootsqz-txt` or `?rootsqz-bin` are packed. Markup in `index.html` and CSS imported with a plain `import "./style.css"` are not in the output. Create the elements from JavaScript, and import CSS as a string to add it yourself:
+  ```js
+  import css from "./style.css?inline";
+  document.head.appendChild(document.createElement("style")).textContent = css;
+  document.body.insertAdjacentHTML("beforeend", "<canvas id=c>");
+  ```
+- rootsqz does not minify the bundle, the minifier of Vite does. `build.minify: 'terser'` (needs the `terser` package) with `terserOptions: { toplevel: true, module: true, compress: { passes: 2 } }` gave an about 1% smaller output than the default minifier in a test with 10 KiB of minified JavaScript.
+- Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
 
 See the [example](https://github.com/r00tkids/rootsqz/tree/main/examples/vite) for a working example with support for `vite-plugin-glsl`.
 
