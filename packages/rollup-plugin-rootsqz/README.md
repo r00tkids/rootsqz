@@ -25,13 +25,15 @@ export default defineConfig({
 
 Import assets with a query parameter to have them compressed with the code:
 ```js
-import text from "./assets/test.json?rootsqz-txt&raw";             // string
+import text from "./assets/scroller.txt?rootsqz-txt";             // string
 import data from "./assets/rand.bin?rootsqz-bin";                  // Uint8Array
 import image from "./assets/logo.jpg?rootsqz-bin&pre-compressed";  // already compressed, stored as it is
 ```
 The plugin orders the files by type and extension for a better compression ratio. For other file types, e.g. minified shaders, use the `fileTransforms` option.
 
-With Vite, add `&raw` for file types that Vite processes itself, such as JSON and CSS. Without it the build fails.
+With Vite, add `&raw` for file types that Vite processes itself, such as CSS (`style.css?rootsqz-txt&raw`). Without it the build fails.
+
+Import JSON without a query parameter. Vite then inlines it as a JavaScript object, which packs smaller than the file as it is and needs no `JSON.parse`.
 
 `vite build` writes the result to `rootsqz-output` in the output directory, e.g. `dist/rootsqz-output/index.html`. The dev server does not compress, it inlines the imported files instead.
 
