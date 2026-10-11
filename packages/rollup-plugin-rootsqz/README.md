@@ -15,6 +15,10 @@ import { defineConfig } from 'vite';
 import rootsqz from '@r00tkids/rollup-plugin-rootsqz';
 
 export default defineConfig({
+  build: {
+    // Disable module preloading for better compression results
+    modulePreload: false,
+  },
   plugins: [rootsqz()]
 });
 ```
@@ -32,7 +36,6 @@ The plugin orders the files by type and extension for a better compression ratio
 Notes:
 - The bundle must be a single JavaScript file. If the build fails because of several chunks, set `build.rollupOptions.output.inlineDynamicImports` to `true`.
 - The plugin only compresses when `NODE_ENV` is `production`. `vite build` sets this by default; with plain Rollup, set it yourself.
-- Setting `build.modulePreload` to `false` in the Vite config gives better compression results.
 
 See the [example](https://github.com/r00tkids/rootsqz/tree/main/examples/vite) for a working example with support for `vite-plugin-glsl`.
 
