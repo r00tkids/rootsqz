@@ -8,10 +8,21 @@ export default defineConfig({
     root: '.',
     build: {
         outDir: 'dist',
-        sourcemap: true,
+
+        // 'hidden' writes the source map without the comment that refers to it,
+        // which would otherwise be packed into the output
+        sourcemap: 'hidden',
 
         // Disable module preloading for better compression results
         modulePreload: false,
+
+        // Terser gives a slightly smaller output than the default minifier
+        minify: 'terser',
+        terserOptions: {
+            toplevel: true,
+            module: true,
+            compress: { passes: 2 },
+        },
     },
     plugins: [
         rootsqz({
