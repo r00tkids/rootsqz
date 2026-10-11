@@ -63,6 +63,9 @@ export function toolEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.Pr
   };
 }
 
+/**
+ * Options for running the executable.
+ */
 export type RunOptions = {
   /**
    * Path of the executable. By default the result of `binaryPath()`.
@@ -105,6 +108,9 @@ export function run(args: string[], options: RunOptions = {}): Promise<void> {
   });
 }
 
+/**
+ * Options of `compress`. They correspond to the command line options of the executable.
+ */
 export type CompressOptions = RunOptions & {
   /**
    * JavaScript file that is evaluated after decompression (`--js-main`).
