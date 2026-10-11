@@ -81,14 +81,43 @@ rootsqz({
      */
     rootsqzArgs: [],
 
+    /**
+     * Hooks that process files before they are imported in code or compressed by rootsqz.
+     * The first hook that matches a module id and returns a result is used.
+     */
     fileTransforms: [
         {
+            /**
+             * Module ids that the transform applies to. By default all.
+             */
             include: /\.glsl$/,
+
+            /**
+             * Module ids that the transform does not apply to.
+             */
+            exclude: undefined,
+
+            /**
+             * Returns the content to pack for the module `id`, given the content of its file as a Buffer.
+             * `ctx` is the Rollup plugin context.
+             */
             transform: async (ctx, id, content) => {
                 return {
+                    /**
+                     * The content to pack, as a Buffer.
+                     */
                     content: Buffer.from("Hello World", "utf-8"),
+
+                    /**
+                     * Whether the content is already compressed and should be stored as it is.
+                     */
                     isCompressed: false,
+
+                    /**
+                     * Whether the content is text. The import then gives a string instead of an Uint8Array.
+                     */
                     isText: true,
+
                     /**
                      * Optional, by default taken from the file path.
                      */
