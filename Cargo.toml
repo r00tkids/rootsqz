@@ -2,7 +2,7 @@
 name = "rootsqz"
 authors = ["Emil Sandstø"]
 description = "Rootsqz is a tool for compressing and decompressing demo intros for web."
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 
 [dependencies]
