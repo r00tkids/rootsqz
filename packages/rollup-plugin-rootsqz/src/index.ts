@@ -222,7 +222,7 @@ export default function (options: RootSqzOptions = {}): Plugin {
 
     writeBundle: async function (outputOptions: OutputOptions, bundle: { [fileName: string]: OutputAsset | OutputChunk }) {
       const jsFiles = Object.entries(bundle)
-        .filter(([fileName, asset]) => fileName.endsWith('.js') && asset.type === 'chunk');
+        .filter((entry): entry is [string, OutputChunk] => entry[0].endsWith('.js') && entry[1].type === 'chunk');
 
       if (jsFiles.length === 0) {
         throw new Error('No JavaScript file found in the bundle.');
@@ -244,7 +244,18 @@ export default function (options: RootSqzOptions = {}): Plugin {
         const filesToCompress = [];
         const preCompressedFiles = [];
 
+        // Files are registered when they're loaded, so leave out the ones whose import was tree-shaken away
+        const renderedIds = new Set(
+          Object.entries(jsChunk.modules)
+            .filter(([, module]) => module.renderedLength > 0)
+            .map(([id]) => id),
+        );
+
         for (const [id, file] of files) {
+          if (!renderedIds.has(id)) {
+            this.debug(`Skipping '${id}', the bundle doesn't use it`);
+            continue;
+          }
           this.debug(`Copying '${id}' for rootsqz...`);
           const outPath = path.resolve(
             outputOptions.dir || "",
