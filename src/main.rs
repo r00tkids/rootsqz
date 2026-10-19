@@ -21,6 +21,8 @@ struct Cli {
 enum Commands {
     /// Pack and compress JS/web assets into a self-contained output
     Web(web::Args),
+    /// Print a view of a compression report written with --report
+    Report(report::query::Args),
 }
 
 fn main() -> Result<()> {
@@ -48,6 +50,7 @@ fn main() -> Result<()> {
     };
     match command {
         Commands::Web(web_args) => web::run(web_args),
+        Commands::Report(report_args) => report::query::run(report_args),
     }
 }
 

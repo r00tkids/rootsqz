@@ -216,3 +216,49 @@ impl ModelConfig {
         })
     }
 }
+
+impl ModelConfig {
+    /// Short description of the model, e.g. `NOrderByte 0b00000111`.
+    pub fn label(&self) -> String {
+        match self {
+            ModelConfig::NOrderByte { byte_mask, .. } => format!("NOrderByte {byte_mask}"),
+            ModelConfig::CharClass { order, .. } => format!("CharClass order {order}"),
+            ModelConfig::Mixer { models } => format!("Mixer of {}", models.len()),
+            ModelConfig::AdaptiveProbabilityMap(_) => "AdaptiveProbabilityMap".to_owned(),
+            ModelConfig::Word => "Word".to_owned(),
+            ModelConfig::TokenPosition => "TokenPosition".to_owned(),
+            ModelConfig::MatchPredictor { context_bytes, .. } => {
+                format!("MatchPredictor context {context_bytes}")
+            }
+            ModelConfig::IndirectByte { context_bytes, .. } => {
+                format!("IndirectByte context {context_bytes}")
+            }
+        }
+    }
+
+    /// Names of the submodels whose predictions `Model::submodel_preds` appends, in the same order.
+    /// A name is the path in the config followed by the label, e.g. `model.models[2] NOrderByte 0b00000011`.
+    pub fn submodel_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        self.append_submodel_names("model", &mut names);
+        names
+    }
+
+    fn append_submodel_names(&self, path: &str, out: &mut Vec<String>) {
+        match self {
+            ModelConfig::Mixer { models } => {
+                for (index, model) in models.iter().enumerate() {
+                    let child_path = format!("{path}.models[{index}]");
+                    out.push(format!("{child_path} {}", model.label()));
+                    model.append_submodel_names(&child_path, out);
+                }
+            }
+            ModelConfig::AdaptiveProbabilityMap(model) => {
+                let child_path = format!("{path}.input");
+                out.push(format!("{child_path} {}", model.label()));
+                model.append_submodel_names(&child_path, out);
+            }
+            _ => {}
+        }
+    }
+}

@@ -251,6 +251,39 @@ pub struct FileWithContent {
     pub content: Vec<u8>,
 }
 
+/// The files written by `render_output` and what they consist of, for the report.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutputFile {
+    pub name: String,
+    pub size: usize,
+    pub parts: Vec<OutputPart>,
+}
+
+/// A byte range of an output file.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutputPart {
+    pub name: String,
+    pub offset: usize,
+    pub length: usize,
+    pub description: String,
+}
+
+impl OutputPart {
+    fn new(
+        name: impl Into<String>,
+        offset: usize,
+        length: usize,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            offset,
+            length,
+            description: description.into(),
+        }
+    }
+}
+
 pub struct BundledFile {
     pub path: PathBuf,
     pub start_offset: u32,
@@ -332,7 +365,7 @@ pub fn render_output(
     js_main_len: usize,
     bundled_files: Vec<BundledFile>,
     extra_files: Vec<FileWithContent>,
-) -> Result<()> {
+) -> Result<Vec<OutputFile>> {
     debug!("Rendering output with options: {:?}", output_options);
 
     let OutputGenerationOptions {
@@ -358,6 +391,7 @@ pub fn render_output(
 
     Ok(match target {
         Target::Web => {
+            let mut pre_compressed_parts = Vec::new();
             let html_path = output_dir.join("index.html");
             let output_file =
                 fs::File::create(&html_path).expect("Failed to create index.html file");
@@ -388,6 +422,11 @@ pub fn render_output(
                     start_offset + file.content.len()
                 );
 
+                pre_compressed_parts.push((
+                    format!("pre-compressed file {}", file.path.display()),
+                    start_offset,
+                    file.content.len(),
+                ));
                 offset += file.content.len();
                 compressed_data.extend_from_slice(&file.content);
             }
@@ -492,6 +531,44 @@ pub fn render_output(
                     100. * (1. - final_size as f64 / size_before_compression as f64)
                 );
             }
+
+            let payload_offset = html_header_bytes.len() + deflated_code.len();
+            let mut parts = vec![
+                OutputPart::new(
+                    "html header",
+                    0,
+                    html_header_bytes.len(),
+                    "HTML that inflates and runs the decompressor",
+                ),
+                OutputPart::new(
+                    "decompressor",
+                    html_header_bytes.len(),
+                    deflated_code.len(),
+                    format!(
+                        "decompressor JavaScript, {} bytes minified, deflated",
+                        decompressor_code_ugly.len()
+                    ),
+                ),
+                OutputPart::new(
+                    "compressed stream",
+                    payload_offset,
+                    encoded_data.len(),
+                    "arithmetic coded stream of the main JavaScript and the --file files",
+                ),
+            ];
+            for (name, offset, length) in pre_compressed_parts {
+                parts.push(OutputPart::new(
+                    name,
+                    payload_offset + offset,
+                    length,
+                    "stored as it is",
+                ));
+            }
+            vec![OutputFile {
+                name: "index.html".to_owned(),
+                size: final_size,
+                parts,
+            }]
         }
         Target::Node => {
             let encoded_data_path = output_dir.join("input.pack");
@@ -506,18 +583,44 @@ pub fn render_output(
                 fs::File::create(&index_src_path).expect("Failed to create index.html file");
 
             let reg = Handlebars::new();
-            reg.render_template_to_write(
-                include_str!("templates/node/index.mjs"),
-                &json!({
-                    "decompressor_source": decompression_code,
-                    "encoded_len": encoded_data.len(),
-                    "decoded_len": size_before_compression,
-                    "input_file": "input.pack",
-                    "output_file": "output.bin",
-                }),
-                writer,
-            )
-            .context("Failed to render node decompressor template")?
+            let index_src = reg
+                .render_template(
+                    include_str!("templates/node/index.mjs"),
+                    &json!({
+                        "decompressor_source": decompression_code,
+                        "encoded_len": encoded_data.len(),
+                        "decoded_len": size_before_compression,
+                        "input_file": "input.pack",
+                        "output_file": "output.bin",
+                    }),
+                )
+                .context("Failed to render node decompressor template")?;
+            BufWriter::new(writer)
+                .write_all(index_src.as_bytes())
+                .context("Failed to write node decompressor")?;
+
+            vec![
+                OutputFile {
+                    name: "index.mjs".to_owned(),
+                    size: index_src.len(),
+                    parts: vec![OutputPart::new(
+                        "decompressor",
+                        0,
+                        index_src.len(),
+                        "decompressor JavaScript",
+                    )],
+                },
+                OutputFile {
+                    name: "input.pack".to_owned(),
+                    size: encoded_data.len(),
+                    parts: vec![OutputPart::new(
+                        "compressed stream",
+                        0,
+                        encoded_data.len(),
+                        "arithmetic coded stream of the main JavaScript and the --file files",
+                    )],
+                },
+            ]
         }
     })
 }

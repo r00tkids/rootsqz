@@ -10,10 +10,10 @@ pub mod output_generator;
 use crate::{
     compressor::{
         compress_config::CompressConfig,
-        model_finder::{create_64k_compress_config, create_default_compress_config},
+        model_finder::{DEFAULT_CONFIG_JSON, SIZE_64K_CONFIG_JSON},
         Encoder,
     },
-    report::ReportGenerator,
+    report::{ReportData, ReportOptions, Section, View, REPORT_DIR},
 };
 use output_generator::{render_output, BundledFile, Loader, OutputGenerationOptions};
 
@@ -41,9 +41,20 @@ pub struct Args {
     #[arg(short, long, default_value = "web")]
     pub target: output_generator::Target,
 
-    /// If set, reports detailed compression statistics to report.html in the output directory
+    /// Write a compression report to the report directory in the output directory:
+    /// report.json (summary for analysis, e.g. by an LLM), report.html (viewer) and data.bin
+    /// (the predictions, queried with `rootsqz report`)
     #[arg(short, long)]
     pub report: bool,
+
+    /// Also record the predictions of every submodel in the report (implies --report).
+    /// Needs memory: 32 bytes per input byte and submodel
+    #[arg(long)]
+    pub report_models: bool,
+
+    /// Also write these views of the report as TSV files (implies --report), e.g. lines,tokens
+    #[arg(long, value_enum, value_delimiter = ',', value_name = "VIEW")]
+    pub report_detail: Vec<View>,
 
     /// Compression model config JSON (uses the embedded default when omitted)
     #[arg(long)]
@@ -137,6 +148,12 @@ pub enum SizeProfile {
     SixtyFourK,
 }
 
+impl Args {
+    fn wants_report(&self) -> bool {
+        self.report || self.report_models || !self.report_detail.is_empty()
+    }
+}
+
 pub fn run(args: Args) -> Result<()> {
     let loader = args.loader()?;
     let main_js_bytes = std::fs::read(&args.js_main)
@@ -160,7 +177,7 @@ pub fn run(args: Args) -> Result<()> {
         if args.target != output_generator::Target::Web {
             bail!("--brotli requires the web target");
         }
-        if args.config.is_some() || args.size_profile != SizeProfile::FourK || args.report {
+        if args.config.is_some() || args.size_profile != SizeProfile::FourK || args.wants_report() {
             bail!("--brotli cannot be combined with --config, --size-profile 64k, or --report");
         }
         println!("Packing {} source bytes with Brotli", source_len);
@@ -171,17 +188,24 @@ pub fn run(args: Args) -> Result<()> {
         );
     }
 
-    let model_config: CompressConfig = match &args.config {
-        Some(path) => serde_json::from_slice(
-            &std::fs::read(path)
-                .with_context(|| format!("Failed to read config: {}", path.display()))?,
-        )
-        .with_context(|| format!("Failed to parse config: {}", path.display()))?,
+    let config_json = match &args.config {
+        Some(path) => std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config: {}", path.display()))?,
         None => match args.size_profile {
-            SizeProfile::FourK => create_default_compress_config(),
-            SizeProfile::SixtyFourK => create_64k_compress_config(),
-        },
+            SizeProfile::FourK => DEFAULT_CONFIG_JSON,
+            SizeProfile::SixtyFourK => SIZE_64K_CONFIG_JSON,
+        }
+        .to_owned(),
     };
+    let model_config: CompressConfig = serde_json::from_str(&config_json).with_context(|| {
+        format!(
+            "Failed to parse config: {}",
+            args.config
+                .as_deref()
+                .unwrap_or(Path::new("(embedded)"))
+                .display()
+        )
+    })?;
 
     println!(
         "Starting compression (rootsqz v{})",
@@ -194,10 +218,14 @@ pub fn run(args: Args) -> Result<()> {
 
     let mut encoded_data: Vec<u8> = Vec::new();
     let mut encoder = Encoder::new(model, &mut encoded_data)?;
+    if args.wants_report() {
+        encoder.record(args.report_models);
+    }
 
     println!("Compressing input data ({} bytes)", main_js_bytes.len());
     encoder.encode_section(main_js_bytes.as_slice())?;
 
+    let mut sections = vec![Section::new(&args.js_main, "main", 0, &main_js_bytes)];
     let mut bundled_files = Vec::new();
     let mut offset = main_js_bytes.len() as u32;
     for file in &args.files {
@@ -207,6 +235,13 @@ pub fn run(args: Args) -> Result<()> {
         println!("Compressing additional file ({} bytes): {}", file_len, file);
         encoder.encode_section(&mut byte_stream)?;
 
+        sections.push(Section {
+            path: file.clone(),
+            kind: "file".to_owned(),
+            start: offset as usize,
+            length: file_len as usize,
+            text: false,
+        });
         bundled_files.push(BundledFile {
             path: PathBuf::from(file),
             start_offset: offset,
@@ -216,6 +251,7 @@ pub fn run(args: Args) -> Result<()> {
         offset += file_len;
     }
 
+    let recording = encoder.take_recording();
     let size_before_compression = encoder.finish().context("Failed to finish compressing")?;
     println!(
         "Finished compressing input data ({} bytes)",
@@ -237,7 +273,7 @@ pub fn run(args: Args) -> Result<()> {
 
     println!("Rendering output...");
 
-    render_output(
+    let outputs = render_output(
         OutputGenerationOptions {
             output_dir: Path::new(&args.output_directory).to_owned(),
             target: args.target,
@@ -253,22 +289,36 @@ pub fn run(args: Args) -> Result<()> {
     )
     .context("Failed to render output")?;
 
-    if args.report {
-        println!("Generating compression report...");
-        let model = model_config
-            .create_model()
-            .context("Failed to create model from config")?;
-
-        ReportGenerator::create(
-            main_js_bytes.as_slice(),
-            model,
-            Path::new(&args.output_directory),
+    if let Some(recording) = recording {
+        println!("Writing compression report...");
+        for section in &mut sections {
+            section.text =
+                Section::new("", "", 0, &recording.input[section.start..section.end()]).text;
+        }
+        let report_dir = Path::new(&args.output_directory).join(REPORT_DIR);
+        ReportData {
+            model_names: if args.report_models {
+                model_config.model.submodel_names()
+            } else {
+                Vec::new()
+            },
+            config_json: serde_json::from_str(&config_json)?,
+            config: model_config,
+            sections,
+            outputs,
+            recording,
+        }
+        .write(
+            &report_dir,
+            &ReportOptions {
+                detail: args.report_detail.clone(),
+            },
         )
-        .context("Failed to generate compression report")?;
-
+        .context("Failed to write the compression report")?;
         println!(
-            "Report generated at '{}/report.html'",
-            args.output_directory
+            "Report written to '{}': report.json (summary), report.html; query it with 'rootsqz report {}'",
+            report_dir.display(),
+            report_dir.display()
         );
     }
 

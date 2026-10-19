@@ -6,7 +6,7 @@ pub mod utils;
 
 mod encoder;
 
-pub use encoder::Encoder;
+pub use encoder::{Encoder, Recording};
 
 #[cfg(test)]
 mod tests {

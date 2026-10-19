@@ -22,6 +22,11 @@ impl<W: Write> ArithmeticEncoder<W> {
         })
     }
 
+    /// Number of bytes written to the output so far.
+    pub fn bytes_written(&self) -> usize {
+        self.bytes_written
+    }
+
     pub fn encode(&mut self, bit: u8, p: f64) -> Result<()> {
         // p is the predicted probability of the bit being 1
         assert!(p >= 0.);

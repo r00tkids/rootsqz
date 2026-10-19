@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rootsqz report</title>
+<style>
+:root {
+  --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc; --panel: #f2f1ed;
+  --accent: #2a62c9; --hl: #2a62c9; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --fg: #e8e7e3; --muted: #9a9993; --line: #33322f; --panel: #1f1f1d; --accent: #7aa7ff; --hl: #7aa7ff; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 24px; align-items: baseline; }
+h1 { font-size: 16px; margin: 0; }
+#totals { color: var(--muted); font-variant-numeric: tabular-nums; }
+#totals b { color: var(--fg); font-weight: 600; }
+#layout { display: grid; grid-template-columns: minmax(320px, 34%) 1fr; height: calc(100vh - 49px); }
+@media (max-width: 800px) { #layout { grid-template-columns: 1fr; height: auto; } }
+aside { border-right: 1px solid var(--line); overflow: auto; background: var(--panel); }
+nav { display: flex; flex-wrap: wrap; gap: 2px; padding: 8px 8px 0; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); }
+nav button { border: 0; background: none; color: var(--muted); padding: 6px 10px; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
+nav button.on { color: var(--fg); border-bottom-color: var(--accent); }
+#panel { padding: 8px 12px 24px; }
+main { overflow: auto; display: flex; flex-direction: column; }
+#toolbar { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+select { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; max-width: 100%; }
+#legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+#legend .bar { display: flex; height: 12px; }
+#legend .bar span { width: 10px; }
+#sections { padding: 8px 16px 40vh; }
+details { margin: 8px 0 16px; }
+details > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+details > summary small { font-weight: 400; color: var(--muted); margin-left: 8px; }
+pre.text { font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; margin: 0; }
+.hex { font: 12px/1.6 var(--mono); }
+.hex .row { display: flex; gap: 12px; }
+.hex .addr { color: var(--muted); width: 7ch; flex: none; text-align: right; }
+.hex .bytes span { display: inline-block; width: 2.6ch; text-align: center; }
+.nl::before { content: "↵"; color: var(--muted); opacity: .6; }
+.hl { outline: 2px solid var(--hl); outline-offset: -1px; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+td.num, th.num { text-align: right; }
+tr.click { cursor: pointer; }
+tr.click:hover { background: var(--bg); }
+code { font: 12px var(--mono); word-break: break-all; }
+.sugg { padding: 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.sugg:hover { background: var(--bg); }
+.sugg .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+.sugg .q { color: var(--muted); font: 11px var(--mono); margin-top: 2px; }
+h2 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); font-weight: 600; }
+p.note { color: var(--muted); font-size: 12.5px; }
+.layoutbar { display: flex; height: 18px; border-radius: 3px; overflow: hidden; margin: 6px 0; }
+.layoutbar span { min-width: 2px; }
+#tip { position: fixed; z-index: 10; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.15); max-width: 420px; display: none; font-variant-numeric: tabular-nums; }
+#tip.pinned { pointer-events: auto; }
+#tip .m { display: grid; grid-template-columns: 1fr 48px 60px; gap: 1px 6px; margin-top: 6px; }
+#tip .m div.b { height: 8px; align-self: center; background: var(--accent); opacity: .7; }
+#tip .m .best { font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>rootsqz compression report</h1>
+  <div id="totals"></div>
+</header>
+<div id="layout">
+  <aside>
+    <nav id="tabs"></nav>
+    <div id="panel"></div>
+  </aside>
+  <main>
+    <div id="toolbar">
+      <label>Color by <select id="mode"></select></label>
+      <div id="legend"></div>
+    </div>
+    <div id="sections"></div>
+  </main>
+</div>
+<div id="tip"></div>
+<script>
+const DATA = /*REPORT_DATA*/null;
+const S = DATA.summary;
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const input = b64(DATA.input);
+const u16 = s => { const b = b64(s); return new Uint16Array(b.buffer, b.byteOffset, b.length / 2); };
+const costs16 = u16(DATA.costs), modelCosts16 = u16(DATA.modelCosts);
+const cost = o => costs16[o] / 256;
+const names = S.models.names, M = names.length;
+const modelCost = (o, j) => modelCosts16[o * M + j] / 256;
+const sections = S.sections;
+const fmt = (v, d = 1) => Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const $ = id => document.getElementById(id);
+
+// Color scales: sequential for costs (0 to 8+ bits), diverging for differences (-8 to +8 bits).
+const style = document.createElement("style");
+let css = "";
+for (let k = 1; k <= 16; k++) css += `.c${k}{background:hsla(${125 - k * 7.8},85%,48%,${0.12 + k * 0.045})}`;
+for (let k = 0; k <= 16; k++) {
+  if (k === 8) continue;
+  const t = Math.abs(k - 8) / 8, hue = k < 8 ? 210 : 10;
+  css += `.d${k}{background:hsla(${hue},85%,50%,${0.1 + t * 0.6})}`;
+}
+style.textContent = css;
+document.head.appendChild(style);
+
+$("totals").innerHTML = [
+  `<b>${S.totals.input_bytes.toLocaleString()}</b> bytes in`,
+  `<b>${fmt(S.totals.cost_bytes)}</b> bytes of cost`,
+  `<b>${fmt(S.totals.bits_per_byte, 3)}</b> bits per byte`,
+  S.totals.compressed_stream_bytes != null ? `stream <b>${S.totals.compressed_stream_bytes.toLocaleString()}</b> bytes` : "",
+  `output <b>${S.totals.output_bytes.toLocaleString()}</b> bytes`,
+].filter(Boolean).join(" · ");
+
+// Color modes.
+const modes = [{ label: "cost of each byte", value: o => cost(o), diverging: false }];
+for (let j = 0; j < M; j++) modes.push({ label: `m${j} alone: ${names[j]}`, value: o => modelCost(o, j), diverging: false });
+for (let j = 0; j < M; j++) modes.push({ label: `m${j} alone minus actual: ${names[j]}`, value: o => modelCost(o, j) - cost(o), diverging: true });
+$("mode").innerHTML = modes.map((m, i) => `<option value="${i}">${esc(m.label)}</option>`).join("");
+let mode = modes[0];
+function cls(v) {
+  if (mode.diverging) return "d" + Math.max(0, Math.min(16, Math.round(v) + 8));
+  const k = Math.min(16, Math.floor(v * 2));
+  return k > 0 ? "c" + k : "";
+}
+function legend() {
+  const ks = mode.diverging ? [...Array(17).keys()] : [...Array(17).keys()].slice(1);
+  $("legend").innerHTML = `<span>${mode.diverging ? "−8 bits (model better)" : "0 bits"}</span><div class="bar">${ks.map(k => `<span class="${mode.diverging ? "d" : "c"}${k}"></span>`).join("")}</div><span>${mode.diverging ? "+8 bits (model worse)" : "8+ bits"}</span>`;
+}
+
+// Content. Every element covers one byte or one UTF-8 character: el.o is its offset, el.n its length.
+const spanAt = new Array(input.length);
+const els = [];
+const lineStarts = sections.map(s => {
+  if (!s.text) return null;
+  const st = [s.start];
+  for (let o = s.start; o < s.end - 1; o++) if (input[o] === 10) st.push(o + 1);
+  return st;
+});
+function sectionOf(o) { return sections.findIndex(s => o < s.end); }
+function lineCol(si, o) {
+  const st = lineStarts[si];
+  if (!st) return null;
+  let lo = 0, hi = st.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (st[mid] <= o) lo = mid; else hi = mid - 1; }
+  return [lo + 1, o - st[lo] + 1];
+}
+const dec = new TextDecoder();
+function makeSpan(o, n, text) {
+  const el = document.createElement("span");
+  el.o = o; el.n = n;
+  if (text === "\n") { el.className = "nl"; el.textContent = "\n"; }
+  else el.textContent = text;
+  for (let k = 0; k < n; k++) spanAt[o + k] = el;
+  els.push(el);
+  return el;
+}
+function renderSection(si, container) {
+  const s = sections[si];
+  const frag = document.createDocumentFragment();
+  if (s.text) {
+    const pre = document.createElement("pre");
+    pre.className = "text";
+    let o = s.start;
+    while (o < s.end) {
+      const b = input[o];
+      const n = b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : 2;
+      pre.appendChild(makeSpan(o, n, dec.decode(input.subarray(o, o + n))));
+      o += n;
+    }
+    frag.appendChild(pre);
+  } else {
+    const hex = document.createElement("div");
+    hex.className = "hex";
+    for (let r = s.start; r < s.end; r += 32) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `<span class="addr">${(r - s.start).toString(16)}</span>`;
+      const bytes = document.createElement("span");
+      bytes.className = "bytes";
+      for (let o = r; o < Math.min(r + 32, s.end); o++) bytes.appendChild(makeSpan(o, 1, input[o].toString(16).padStart(2, "0")));
+      row.appendChild(bytes);
+      hex.appendChild(row);
+    }
+    frag.appendChild(hex);
+  }
+  container.appendChild(frag);
+}
+const root = $("sections");
+sections.forEach((s, si) => {
+  const d = document.createElement("details");
+  d.open = true;
+  d.id = "sec" + si;
+  d.innerHTML = `<summary>${esc(s.path)}<small>${s.kind} · ${s.text ? "text" : "binary"} · ${s.length.toLocaleString()} bytes · ${fmt(s.cost_bytes)} bytes of cost · ${fmt(s.bits_per_byte, 3)} bits/byte · offset ${s.start}</small></summary>`;
+  root.appendChild(d);
+  renderSection(si, d);
+});
+function valueOf(el) { let v = 0; for (let k = 0; k < el.n; k++) v += mode.value(el.o + k); return v; }
+function paint() {
+  for (const el of els) {
+    const c = cls(valueOf(el));
+    el.className = (el.className.includes("nl") ? "nl " : "") + (el.className.includes("hl") ? "hl " : "") + c;
+  }
+  legend();
+}
+$("mode").onchange = e => { mode = modes[+e.target.value]; paint(); };
+paint();
+
+// Tooltip.
+const tip = $("tip");
+let pinned = false;
+function showTip(el, x, y) {
+  const o = el.o, si = sectionOf(o), s = sections[si];
+  let c = 0; for (let k = 0; k < el.n; k++) c += cost(o + k);
+  const lc = lineCol(si, o);
+  const bytes = Array.from(input.subarray(o, o + el.n), b => b.toString(16).padStart(2, "0")).join(" ");
+  let h = `<div><b>${esc(s.path)}</b>${lc ? ` line ${lc[0]}, column ${lc[1]}` : ""}</div>`;
+  h += `<div>offset ${o} (section +${o - s.start}) · bytes ${bytes}</div>`;
+  h += `<div><b>${fmt(c, 2)}</b> bits · stream position ≈ ${o ? DATA.encodedPos[o - 1] : 0}</div>`;
+  if (M) {
+    const mc = names.map((_, j) => { let v = 0; for (let k = 0; k < el.n; k++) v += modelCost(o + k, j); return [j, v]; }).sort((a, b) => a[1] - b[1]);
+    const max = Math.max(8, ...mc.map(x => x[1]));
+    h += `<div class="m">` + mc.map(([j, v], i) => `<span class="${i ? "" : "best"}" title="${esc(names[j])}">m${j} ${esc(names[j].replace(/^model\./, "").slice(0, 34))}</span><span class="num">${fmt(v, 2)}</span><div class="b" style="width:${(v / max) * 60}px"></div>`).join("") + `</div>`;
+  }
+  h += `<div style="color:var(--muted);margin-top:4px">rootsqz report &lt;dir&gt; --view bits --range ${o}..${o + el.n}${M ? " --models" : ""}</div>`;
+  tip.innerHTML = h;
+  tip.style.display = "block";
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.max(8, Math.min(x + 14, innerWidth - r.width - 8)) + "px";
+  tip.style.top = (y + 18 + r.height > innerHeight ? y - r.height - 10 : y + 18) + "px";
+}
+root.addEventListener("mousemove", e => { if (!pinned && e.target.o !== undefined) showTip(e.target, e.clientX, e.clientY); });
+root.addEventListener("mouseleave", () => { if (!pinned) tip.style.display = "none"; });
+root.addEventListener("click", e => {
+  if (e.target.o === undefined) { pinned = false; tip.classList.remove("pinned"); tip.style.display = "none"; return; }
+  pinned = !pinned; tip.classList.toggle("pinned", pinned); showTip(e.target, e.clientX, e.clientY);
+});
+
+let highlighted = [];
+function goTo(start, end) {
+  for (const el of highlighted) el.classList.remove("hl");
+  highlighted = [];
+  const seen = new Set();
+  for (let o = start; o < Math.min(end, input.length); o++) {
+    const el = spanAt[o];
+    if (el && !seen.has(el)) { seen.add(el); el.classList.add("hl"); highlighted.push(el); }
+  }
+  if (highlighted[0]) {
+    highlighted[0].closest("details").open = true;
+    highlighted[0].scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+// Side panels.
+function table(rows, cols, onClick) {
+  const head = cols.map(c => `<th class="${c.num ? "num" : ""}">${esc(c.label)}</th>`).join("");
+  const body = rows.map((r, i) => `<tr data-i="${i}" class="${onClick ? "click" : ""}">${cols.map(c => `<td class="${c.num ? "num" : ""}">${c.html ? c.html(r) : esc(c.get(r))}</td>`).join("")}</tr>`).join("");
+  const t = document.createElement("table");
+  t.innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
+  if (onClick) t.onclick = e => { const tr = e.target.closest("tr[data-i]"); if (tr) onClick(rows[+tr.dataset.i]); };
+  return t;
+}
+const num = (label, key, d = 1) => ({ label, num: true, get: r => r[key] == null ? "" : fmt(r[key], d) });
+const txt = (label, key) => ({ label, get: r => r[key] ?? "" });
+const code = (label, key) => ({ label, html: r => `<code>${esc(r[key])}</code>` });
+const h2 = t => Object.assign(document.createElement("h2"), { textContent: t });
+const note = t => Object.assign(document.createElement("p"), { className: "note", textContent: t });
+
+const panels = {
+  "Suggestions": p => {
+    p.appendChild(note("Candidates worth looking into, largest cost first. They are heuristics: compress again to see what a change saves. Click one to show it."));
+    for (const s of S.suggestions) {
+      const d = document.createElement("div");
+      d.className = "sugg";
+      d.innerHTML = `<div class="k">${esc(s.kind)}${s.bits ? ` · ${fmt(s.bits / 8)} bytes` : ""}</div><div>${esc(s.message)}</div><div class="q">rootsqz report &lt;dir&gt; ${esc(s.query)}</div>`;
+      if (s.start != null) d.onclick = () => goTo(s.start, s.end);
+      p.appendChild(d);
+    }
+    if (!S.suggestions.length) p.appendChild(note("No suggestions."));
+  },
+  "Sections": p => {
+    p.appendChild(note("The main JavaScript and each --file, in the order they are compressed. The model learns across them."));
+    p.appendChild(table(sections, [txt("#", "index"), code("path", "path"), num("bytes", "length", 0), num("cost", "cost_bytes"), num("bits/byte", "bits_per_byte", 3)], r => goTo(r.start, r.start + 1)));
+    p.appendChild(h2("Cost by token kind"));
+    p.appendChild(table(S.token_kinds, [txt("kind", "kind"), num("count", "count", 0), num("bytes", "length", 0), num("bits", "bits"), num("bits/byte", "bits_per_byte", 3)]));
+  },
+  "Top": p => {
+    const go = r => goTo(r.start ?? r.first_start, r.end ?? (r.first_start + r.length));
+    p.appendChild(h2("Hotspots: most expensive 32 bytes"));
+    p.appendChild(table(S.top.hotspots, [txt("line", "line"), num("bits", "bits"), num("b/B", "bits_per_byte", 2), code("text", "text")], go));
+    p.appendChild(h2("Most expensive lines"));
+    p.appendChild(table(S.top.lines, [txt("line", "line"), num("bits", "bits"), num("b/B", "bits_per_byte", 2), code("text", "text")], go));
+    if (S.top.blocks.length) {
+      p.appendChild(h2("Most expensive blocks"));
+      p.appendChild(table(S.top.blocks, [txt("start", "start"), num("bits", "bits"), num("b/B", "bits_per_byte", 2)], go));
+    }
+    p.appendChild(h2("Identifiers by total cost"));
+    p.appendChild(table(S.top.identifiers, [code("ident", "text"), num("count", "count", 0), num("bits", "bits"), num("each", "bits_per_occurrence")], go));
+    p.appendChild(h2("Numbers by total cost"));
+    p.appendChild(table(S.top.numbers, [code("number", "text"), num("count", "count", 0), num("bits", "bits"), num("each", "bits_per_occurrence")], go));
+    p.appendChild(h2("Repeats that still cost"));
+    p.appendChild(table(S.top.repeats, [txt("start", "start"), txt("earlier", "earlier_start"), num("bytes", "length", 0), num("bits", "bits"), code("text", "text")], go));
+  },
+  "Output": p => {
+    const colors = ["#8b8", "#c96", "#69c", "#b8b", "#cb6", "#6bb"];
+    for (const f of S.outputs) {
+      p.appendChild(h2(`${f.name} · ${f.size.toLocaleString()} bytes`));
+      const bar = document.createElement("div");
+      bar.className = "layoutbar";
+      bar.innerHTML = f.parts.map((x, i) => `<span title="${esc(x.name)}" style="flex:${x.length};background:${colors[i % colors.length]}"></span>`).join("");
+      p.appendChild(bar);
+      p.appendChild(table(f.parts, [{ label: "", html: r => `<span style="display:inline-block;width:10px;height:10px;background:${colors[f.parts.indexOf(r) % colors.length]}"></span>` }, txt("part", "name"), num("offset", "offset", 0), num("bytes", "length", 0), txt("", "description")]));
+    }
+  },
+  "Models": p => {
+    if (!M) { p.appendChild(note(S.models.note)); return; }
+    p.appendChild(note("What each submodel alone would have cost. A submodel can help the mix even if it is bad alone. Click one to color the content by it."));
+    p.appendChild(table(S.models.summary, [txt("#", "model"), txt("name", "name"), num("bits", "bits"), num("over actual", "bits_over_actual"), num("best", "best_share", 3)], r => {
+      if (r.model == null) return;
+      $("mode").value = 1 + r.model; mode = modes[1 + r.model]; paint();
+    }));
+  },
+  "About": p => { for (const t of S.about) p.appendChild(note(t)); },
+};
+let current = "Suggestions";
+function showPanel(name) {
+  current = name;
+  $("tabs").innerHTML = Object.keys(panels).map(k => `<button class="${k === name ? "on" : ""}">${k}</button>`).join("");
+  const p = $("panel"); p.innerHTML = ""; panels[name](p);
+}
+$("tabs").onclick = e => { if (e.target.tagName === "BUTTON") showPanel(e.target.textContent); };
+showPanel(current);
+</script>
+</body>
+</html>

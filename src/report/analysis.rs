@@ -1,0 +1,1331 @@
+use std::collections::HashMap;
+
+use serde_json::{json, Value};
+
+use super::{
+    query::{Filter, Sort},
+    table::{escape, Cell, Table},
+    ReportData, Section,
+};
+use crate::compressor::compress_config::ModelConfig;
+
+/// Views of the report, printed by `rootsqz report --view` and written by `--report-detail`.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    /// Totals, output layout, sections, top lists and suggestions (JSON)
+    Summary,
+    /// One row per input file
+    Sections,
+    /// One row per line of the text sections
+    Lines,
+    /// One row per block of the binary sections
+    Blocks,
+    /// The most expensive windows of bytes, not overlapping
+    Hotspots,
+    /// One row per token of the text sections
+    Tokens,
+    /// Tokens grouped by their text
+    TokenTotals,
+    /// One row per byte
+    Bytes,
+    /// One row per bit, with the predicted probability
+    Bits,
+    /// Repeated byte strings and what their repetition costs
+    Repeats,
+    /// One row per submodel: what it alone would have cost (needs --report-models)
+    Models,
+    /// Candidates worth looking into
+    Suggestions,
+}
+
+impl View {
+    pub fn name(self) -> &'static str {
+        match self {
+            View::Summary => "summary",
+            View::Sections => "sections",
+            View::Lines => "lines",
+            View::Blocks => "blocks",
+            View::Hotspots => "hotspots",
+            View::Tokens => "tokens",
+            View::TokenTotals => "token-totals",
+            View::Bytes => "bytes",
+            View::Bits => "bits",
+            View::Repeats => "repeats",
+            View::Models => "models",
+            View::Suggestions => "suggestions",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            View::Summary => "this summary",
+            View::Sections => "one row per input file (section) of the compressed stream",
+            View::Lines => "one row per line of the text sections; line and column are 1-based",
+            View::Blocks => "one row per block (default 64 bytes) of the binary sections",
+            View::Hotspots => "the most expensive windows of --window bytes (default 32), not overlapping, largest cost first",
+            View::Tokens => "one row per token of the text sections (kinds: ident, number, space, punct, other)",
+            View::TokenTotals => "tokens grouped by kind and text: count and total cost",
+            View::Bytes => "one row per byte",
+            View::Bits => "one row per bit: the bit, the predicted p(1) and its cost; bit 0 is the most significant",
+            View::Repeats => "byte strings of 8 or more bytes that occurred before, with what they cost again",
+            View::Models => "one row per submodel: bits it alone would have cost, and for how many bytes it was the best",
+            View::Suggestions => "candidates worth looking into, largest cost first",
+        }
+    }
+
+    pub const ALL: [View; 12] = [
+        View::Summary,
+        View::Sections,
+        View::Lines,
+        View::Blocks,
+        View::Hotspots,
+        View::Tokens,
+        View::TokenTotals,
+        View::Bytes,
+        View::Bits,
+        View::Repeats,
+        View::Models,
+        View::Suggestions,
+    ];
+}
+
+/// Cost in bits of coding `bit` with the stretched prediction `s` (logit of p(1)).
+fn bit_cost(s: f32, bit: u8) -> f64 {
+    let x = if bit == 1 { -s as f64 } else { s as f64 };
+    let softplus = if x > 30. { x } else { x.exp().ln_1p() };
+    softplus / std::f64::consts::LN_2
+}
+
+fn squash(s: f32) -> f64 {
+    1. / (1. + (-(s as f64)).exp())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TokenKind {
+    Ident,
+    Number,
+    Space,
+    Punct,
+    Other,
+}
+
+impl TokenKind {
+    fn name(self) -> &'static str {
+        match self {
+            TokenKind::Ident => "ident",
+            TokenKind::Number => "number",
+            TokenKind::Space => "space",
+            TokenKind::Punct => "punct",
+            TokenKind::Other => "other",
+        }
+    }
+}
+
+/// A byte range of the decompressed stream that a row describes.
+#[derive(Debug, Clone)]
+struct Unit {
+    section: usize,
+    start: usize,
+    end: usize,
+}
+
+/// Splits text into tokens, roughly as in JavaScript or GLSL.
+fn tokenize(bytes: &[u8], base: usize) -> Vec<(usize, usize, TokenKind)> {
+    let is_ident_start = |b: u8| b.is_ascii_alphabetic() || b == b'_' || b == b'$' || b >= 0x80;
+    let is_ident = |b: u8| is_ident_start(b) || b.is_ascii_digit();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let start = i;
+        let kind = if is_ident_start(b) {
+            while i < bytes.len() && is_ident(bytes[i]) {
+                i += 1;
+            }
+            TokenKind::Ident
+        } else if b.is_ascii_digit()
+            || (b == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit())
+        {
+            let hex = b == b'0' && i + 1 < bytes.len() && matches!(bytes[i + 1], b'x' | b'X');
+            i += 1;
+            while i < bytes.len() {
+                let c = bytes[i];
+                let exponent_sign =
+                    !hex && matches!(c, b'+' | b'-') && matches!(bytes[i - 1], b'e' | b'E');
+                if c.is_ascii_alphanumeric() || c == b'.' || c == b'_' || exponent_sign {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            TokenKind::Number
+        } else if b.is_ascii_whitespace() {
+            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            TokenKind::Space
+        } else if b.is_ascii_punctuation() {
+            i += 1;
+            TokenKind::Punct
+        } else {
+            i += 1;
+            TokenKind::Other
+        };
+        tokens.push((base + start, base + i, kind));
+    }
+    tokens
+}
+
+pub struct Analysis<'a> {
+    data: &'a ReportData,
+    /// Cost in bits of every byte.
+    byte_costs: Vec<f64>,
+    /// Number of submodels, 0 if not recorded.
+    m: usize,
+    /// Cost in bits of every byte for every submodel alone, `m` per byte.
+    model_byte_costs: Vec<f32>,
+    /// Offsets of the line starts of each text section (empty for binary sections).
+    line_starts: Vec<Vec<usize>>,
+    tokens: Vec<Vec<(usize, usize, TokenKind)>>,
+}
+
+impl<'a> Analysis<'a> {
+    pub fn new(data: &'a ReportData) -> Self {
+        let r = &data.recording;
+        let n = r.input.len();
+        let m = data.model_names.len();
+        let mut byte_costs = vec![0.; n];
+        let mut model_byte_costs = vec![0f32; n * m];
+        for (i, &byte) in r.input.iter().enumerate() {
+            for k in 0..8 {
+                let bit = (byte >> (7 - k)) & 1;
+                let b = i * 8 + k;
+                byte_costs[i] += bit_cost(r.preds[b], bit);
+                for j in 0..m {
+                    model_byte_costs[i * m + j] +=
+                        bit_cost(r.submodel_preds[b * m + j], bit) as f32;
+                }
+            }
+        }
+
+        let mut line_starts = Vec::new();
+        let mut tokens = Vec::new();
+        for s in &data.sections {
+            let bytes = &r.input[s.start..s.end()];
+            if s.text {
+                let mut starts = vec![s.start];
+                starts.extend(
+                    bytes
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, &b)| b == b'\n' && i + 1 < bytes.len())
+                        .map(|(i, _)| s.start + i + 1),
+                );
+                line_starts.push(starts);
+                tokens.push(tokenize(bytes, s.start));
+            } else {
+                line_starts.push(Vec::new());
+                tokens.push(Vec::new());
+            }
+        }
+
+        Self {
+            data,
+            byte_costs,
+            m,
+            model_byte_costs,
+            line_starts,
+            tokens,
+        }
+    }
+
+    fn input(&self) -> &[u8] {
+        &self.data.recording.input
+    }
+
+    fn cost(&self, start: usize, end: usize) -> f64 {
+        self.byte_costs[start..end].iter().sum()
+    }
+
+    fn model_costs(&self, start: usize, end: usize) -> Vec<f64> {
+        let mut costs = vec![0.; self.m];
+        for i in start..end {
+            for (j, c) in costs.iter_mut().enumerate() {
+                *c += self.model_byte_costs[i * self.m + j] as f64;
+            }
+        }
+        costs
+    }
+
+    /// Position in the compressed stream before `offset` was coded.
+    fn encoded_before(&self, offset: usize) -> usize {
+        if offset == 0 {
+            0
+        } else {
+            self.data.recording.encoded_pos[offset - 1] as usize
+        }
+    }
+
+    fn encoded_after(&self, offset: usize) -> usize {
+        self.data.recording.encoded_pos[offset] as usize
+    }
+
+    fn section_of(&self, offset: usize) -> usize {
+        self.data
+            .sections
+            .iter()
+            .position(|s| offset < s.end())
+            .unwrap_or(self.data.sections.len() - 1)
+    }
+
+    /// 1-based line and column of `offset` in a text section.
+    fn line_col(&self, section: usize, offset: usize) -> Option<(usize, usize)> {
+        let starts = &self.line_starts[section];
+        if starts.is_empty() {
+            return None;
+        }
+        let line = starts.partition_point(|&s| s <= offset) - 1;
+        Some((line + 1, offset - starts[line] + 1))
+    }
+
+    fn sections_in(&self, filter: &Filter) -> impl Iterator<Item = (usize, &Section)> {
+        let only = filter.section;
+        self.data
+            .sections
+            .iter()
+            .enumerate()
+            .filter(move |(i, _)| only.map_or(true, |o| o == *i))
+    }
+
+    fn in_range(filter: &Filter, start: usize, end: usize) -> bool {
+        filter.range.map_or(true, |(a, b)| start < b && end > a)
+    }
+
+    fn lines(&self, filter: &Filter) -> Vec<Unit> {
+        let mut units = Vec::new();
+        for (i, s) in self.sections_in(filter).filter(|(_, s)| s.text) {
+            let starts = &self.line_starts[i];
+            for (k, &start) in starts.iter().enumerate() {
+                let end = starts.get(k + 1).copied().unwrap_or(s.end());
+                units.push(Unit {
+                    section: i,
+                    start,
+                    end,
+                });
+            }
+        }
+        units
+    }
+
+    fn blocks(&self, filter: &Filter) -> Vec<Unit> {
+        let mut units = Vec::new();
+        for (i, s) in self.sections_in(filter).filter(|(_, s)| !s.text) {
+            let mut start = s.start;
+            while start < s.end() {
+                let end = (start + filter.block_size).min(s.end());
+                units.push(Unit {
+                    section: i,
+                    start,
+                    end,
+                });
+                start = end;
+            }
+        }
+        units
+    }
+
+    /// Windows of `filter.window` bytes with the highest cost, chosen greedily so that they do not overlap.
+    fn hotspots(&self, filter: &Filter) -> Vec<Unit> {
+        let mut units = Vec::new();
+        for (i, s) in self.sections_in(filter) {
+            let w = filter.window.min(s.length);
+            if w == 0 {
+                continue;
+            }
+            let mut prefix = vec![0.; s.length + 1];
+            for k in 0..s.length {
+                prefix[k + 1] = prefix[k] + self.byte_costs[s.start + k];
+            }
+            let mut windows: Vec<(f64, usize)> = (0..=s.length - w)
+                .map(|k| (prefix[k + w] - prefix[k], k))
+                .collect();
+            windows.sort_by(|a, b| b.0.total_cmp(&a.0));
+            let mut covered = vec![false; s.length];
+            for (_, k) in windows {
+                if covered[k] || covered[k + w - 1] {
+                    continue;
+                }
+                covered[k..k + w].iter_mut().for_each(|c| *c = true);
+                units.push(Unit {
+                    section: i,
+                    start: s.start + k,
+                    end: s.start + k + w,
+                });
+            }
+        }
+        units
+    }
+
+    fn token_list(&self, filter: &Filter) -> Vec<(Unit, TokenKind)> {
+        let mut units = Vec::new();
+        for (i, _) in self.sections_in(filter) {
+            for &(start, end, kind) in &self.tokens[i] {
+                if filter.kind.as_deref().map_or(true, |k| k == kind.name()) {
+                    units.push((
+                        Unit {
+                            section: i,
+                            start,
+                            end,
+                        },
+                        kind,
+                    ));
+                }
+            }
+        }
+        units
+    }
+
+    /// The bytes of a unit as escaped text, or as hex in a binary section.
+    fn snippet(&self, unit: &Unit) -> String {
+        let bytes = &self.input()[unit.start..unit.end];
+        if self.data.sections[unit.section].text {
+            escape(bytes, 120)
+        } else {
+            bytes.iter().map(|b| format!("{b:02x}")).collect()
+        }
+    }
+
+    /// Where a unit is, for messages: `path:line:column` or `path +offset`.
+    fn place(&self, unit: &Unit) -> String {
+        let s = &self.data.sections[unit.section];
+        match self.line_col(unit.section, unit.start) {
+            Some((line, col)) => format!("{}:{line}:{col}", s.path),
+            None => format!("{} +{}", s.path, unit.start - s.start),
+        }
+    }
+
+    /// Columns shared by all views of byte ranges.
+    const UNIT_COLUMNS: [&'static str; 8] = [
+        "section",
+        "start",
+        "end",
+        "length",
+        "bits",
+        "bits_per_byte",
+        "encoded_start",
+        "encoded_end",
+    ];
+
+    fn unit_cells(&self, unit: &Unit) -> Vec<Cell> {
+        let bits = self.cost(unit.start, unit.end);
+        let length = unit.end - unit.start;
+        vec![
+            unit.section.into(),
+            unit.start.into(),
+            unit.end.into(),
+            length.into(),
+            Cell::bits(bits),
+            Cell::Float(bits / length.max(1) as f64, 3),
+            self.encoded_before(unit.start).into(),
+            self.encoded_after(unit.end - 1).into(),
+        ]
+    }
+
+    fn model_columns(&self, filter: &Filter) -> Vec<String> {
+        if !filter.models {
+            return Vec::new();
+        }
+        let mut columns = vec!["best_model".to_owned()];
+        columns.extend((0..self.m).map(|j| format!("m{j}")));
+        columns
+    }
+
+    fn model_cells(&self, filter: &Filter, unit: &Unit) -> Vec<Cell> {
+        if !filter.models {
+            return Vec::new();
+        }
+        let costs = self.model_costs(unit.start, unit.end);
+        let best = (0..self.m)
+            .min_by(|&a, &b| costs[a].total_cmp(&costs[b]))
+            .map_or(Cell::Empty, |b| Cell::Int(b as i64));
+        let mut cells = vec![best];
+        cells.extend(costs.into_iter().map(Cell::bits));
+        cells
+    }
+
+    fn unit_table(
+        &self,
+        filter: &Filter,
+        extra: &[&str],
+        units: Vec<Unit>,
+        extra_cells: impl Fn(&Unit) -> Vec<Cell>,
+    ) -> Table {
+        let mut columns: Vec<String> = Self::UNIT_COLUMNS.iter().map(|c| c.to_string()).collect();
+        columns.extend(extra.iter().map(|c| c.to_string()));
+        columns.extend(self.model_columns(filter));
+        let mut table = Table {
+            columns,
+            rows: Vec::new(),
+        };
+        for unit in units {
+            if !Self::in_range(filter, unit.start, unit.end) {
+                continue;
+            }
+            let mut row = self.unit_cells(&unit);
+            row.extend(extra_cells(&unit));
+            row.extend(self.model_cells(filter, &unit));
+            table.rows.push(row);
+        }
+        table
+    }
+
+    fn line_col_cells(&self, unit: &Unit) -> Vec<Cell> {
+        match self.line_col(unit.section, unit.start) {
+            Some((line, col)) => vec![line.into(), col.into()],
+            None => vec![Cell::Empty, Cell::Empty],
+        }
+    }
+
+    pub fn view(&self, view: View, filter: &Filter) -> Table {
+        let input = self.input();
+        let (mut table, default_sort) = match view {
+            View::Summary => (Table::new(&[]), Sort::Offset),
+            View::Sections => (self.sections_table(filter), Sort::Offset),
+            View::Lines => (
+                self.unit_table(filter, &["line", "text"], self.lines(filter), |u| {
+                    let (line, _) = self.line_col(u.section, u.start).unwrap();
+                    let text = input[u.start..u.end]
+                        .strip_suffix(b"\n")
+                        .unwrap_or(&input[u.start..u.end]);
+                    vec![line.into(), escape(text, 200).into()]
+                }),
+                Sort::Offset,
+            ),
+            View::Blocks => (
+                self.unit_table(filter, &["hex"], self.blocks(filter), |u| {
+                    let hex: Vec<String> = input[u.start..u.end]
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect();
+                    vec![hex.join("").into()]
+                }),
+                Sort::Offset,
+            ),
+            View::Hotspots => (
+                self.unit_table(
+                    filter,
+                    &["line", "column", "text"],
+                    self.hotspots(filter),
+                    |u| {
+                        let mut cells = self.line_col_cells(u);
+                        cells.push(self.snippet(u).into());
+                        cells
+                    },
+                ),
+                Sort::Bits,
+            ),
+            View::Tokens => {
+                let tokens = self.token_list(filter);
+                let kinds: HashMap<usize, TokenKind> =
+                    tokens.iter().map(|(u, k)| (u.start, *k)).collect();
+                (
+                    self.unit_table(
+                        filter,
+                        &["line", "column", "kind", "text"],
+                        tokens.into_iter().map(|(u, _)| u).collect(),
+                        |u| {
+                            let mut cells = self.line_col_cells(u);
+                            cells.push(kinds[&u.start].name().into());
+                            cells.push(escape(&input[u.start..u.end], 80).into());
+                            cells
+                        },
+                    ),
+                    Sort::Offset,
+                )
+            }
+            View::TokenTotals => (self.token_totals(filter), Sort::Bits),
+            View::Bytes => {
+                let units = self
+                    .sections_in(filter)
+                    .flat_map(|(i, s)| {
+                        (s.start..s.end()).map(move |o| Unit {
+                            section: i,
+                            start: o,
+                            end: o + 1,
+                        })
+                    })
+                    .filter(|u| Self::in_range(filter, u.start, u.end))
+                    .collect();
+                (
+                    self.unit_table(filter, &["line", "column", "byte", "char"], units, |u| {
+                        let mut cells = self.line_col_cells(u);
+                        cells.push(format!("{:02x}", input[u.start]).into());
+                        cells.push(escape(&input[u.start..u.end], 1).into());
+                        cells
+                    }),
+                    Sort::Offset,
+                )
+            }
+            View::Bits => (self.bits_table(filter), Sort::Offset),
+            View::Repeats => (self.repeats_table(filter), Sort::Bits),
+            View::Models => (self.models_table(filter), Sort::Offset),
+            View::Suggestions => (self.suggestions_table(), Sort::Bits),
+        };
+
+        if let Some(min) = filter.min_bits {
+            if let Some(i) = table.columns.iter().position(|c| c == "bits") {
+                table
+                    .rows
+                    .retain(|row| matches!(row[i], Cell::Float(v, _) if v >= min));
+            }
+        }
+        let sort = filter.sort.unwrap_or(if filter.top.is_some() {
+            Sort::Bits
+        } else {
+            default_sort
+        });
+        match sort {
+            Sort::Offset => {}
+            Sort::Bits => table.sort_desc("bits"),
+            Sort::BitsPerByte => table.sort_desc("bits_per_byte"),
+        }
+        if let Some(n) = filter.top {
+            table.truncate(n);
+        }
+        table
+    }
+
+    fn sections_table(&self, filter: &Filter) -> Table {
+        let mut table = Table::new(&[
+            "index",
+            "path",
+            "kind",
+            "text",
+            "start",
+            "end",
+            "length",
+            "bits",
+            "cost_bytes",
+            "bits_per_byte",
+            "encoded_start",
+            "encoded_end",
+        ]);
+        for (i, s) in self.sections_in(filter) {
+            if !Self::in_range(filter, s.start, s.end()) {
+                continue;
+            }
+            let bits = if s.length > 0 {
+                self.cost(s.start, s.end())
+            } else {
+                0.
+            };
+            table.push(vec![
+                i.into(),
+                s.path.as_str().into(),
+                s.kind.as_str().into(),
+                Cell::Bool(s.text),
+                s.start.into(),
+                s.end().into(),
+                s.length.into(),
+                Cell::bits(bits),
+                Cell::bits(bits / 8.),
+                Cell::Float(bits / s.length.max(1) as f64, 3),
+                if s.length > 0 {
+                    self.encoded_before(s.start).into()
+                } else {
+                    Cell::Empty
+                },
+                if s.length > 0 {
+                    self.encoded_after(s.end() - 1).into()
+                } else {
+                    Cell::Empty
+                },
+            ]);
+        }
+        table
+    }
+
+    fn token_totals(&self, filter: &Filter) -> Table {
+        struct Total {
+            count: usize,
+            bits: f64,
+            length: usize,
+            first: usize,
+        }
+        let mut totals: HashMap<(TokenKind, &[u8]), Total> = HashMap::new();
+        let input = self.input();
+        for (u, kind) in self.token_list(filter) {
+            if !Self::in_range(filter, u.start, u.end) {
+                continue;
+            }
+            let total = totals
+                .entry((kind, &input[u.start..u.end]))
+                .or_insert(Total {
+                    count: 0,
+                    bits: 0.,
+                    length: u.end - u.start,
+                    first: u.start,
+                });
+            total.count += 1;
+            total.bits += self.cost(u.start, u.end);
+        }
+        let mut table = Table::new(&[
+            "kind",
+            "text",
+            "length",
+            "count",
+            "bits",
+            "bits_per_occurrence",
+            "bits_per_byte",
+            "first_start",
+        ]);
+        let mut entries: Vec<_> = totals.into_iter().collect();
+        entries.sort_by_key(|(_, t)| t.first);
+        for ((kind, text), t) in entries {
+            table.push(vec![
+                kind.name().into(),
+                escape(text, 80).into(),
+                t.length.into(),
+                t.count.into(),
+                Cell::bits(t.bits),
+                Cell::bits(t.bits / t.count as f64),
+                Cell::Float(t.bits / (t.length * t.count) as f64, 3),
+                t.first.into(),
+            ]);
+        }
+        table
+    }
+
+    fn bits_table(&self, filter: &Filter) -> Table {
+        let mut columns = vec!["offset", "section", "bit", "value", "p1", "bits"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+        if filter.models {
+            columns.extend((0..self.m).map(|j| format!("m{j}_p1")));
+        }
+        let mut table = Table {
+            columns,
+            rows: Vec::new(),
+        };
+        let r = &self.data.recording;
+        for (i, s) in self.sections_in(filter) {
+            for offset in s.start..s.end() {
+                if !Self::in_range(filter, offset, offset + 1) {
+                    continue;
+                }
+                for k in 0..8 {
+                    let b = offset * 8 + k;
+                    let bit = (r.input[offset] >> (7 - k)) & 1;
+                    let mut row = vec![
+                        offset.into(),
+                        i.into(),
+                        k.into(),
+                        (bit as usize).into(),
+                        Cell::Float(squash(r.preds[b]), 4),
+                        Cell::Float(bit_cost(r.preds[b], bit), 3),
+                    ];
+                    if filter.models {
+                        row.extend(
+                            (0..self.m)
+                                .map(|j| Cell::Float(squash(r.submodel_preds[b * self.m + j]), 4)),
+                        );
+                    }
+                    table.rows.push(row);
+                }
+            }
+        }
+        table
+    }
+
+    /// Byte strings of at least `MIN` bytes that occurred before, found greedily from the start.
+    fn repeats(&self, filter: &Filter) -> Vec<(Unit, usize)> {
+        const MIN: usize = 8;
+        let input = self.input();
+        let mut last: HashMap<&[u8], usize> = HashMap::new();
+        let mut repeats = Vec::new();
+        let mut i = 0;
+        while i + MIN <= input.len() {
+            let key = &input[i..i + MIN];
+            if let Some(&earlier) = last.get(key) {
+                let mut len = MIN;
+                while i + len < input.len() && input[earlier + len] == input[i + len] {
+                    len += 1;
+                }
+                let section = self.section_of(i);
+                let unit = Unit {
+                    section,
+                    start: i,
+                    end: i + len,
+                };
+                if filter.section.map_or(true, |s| s == section)
+                    && Self::in_range(filter, unit.start, unit.end)
+                {
+                    repeats.push((unit, earlier));
+                }
+                for k in i..i + len {
+                    if k + MIN <= input.len() {
+                        last.insert(&input[k..k + MIN], k);
+                    }
+                }
+                i += len;
+            } else {
+                last.insert(key, i);
+                i += 1;
+            }
+        }
+        repeats
+    }
+
+    fn repeats_table(&self, filter: &Filter) -> Table {
+        let repeats = self.repeats(filter);
+        let earlier: HashMap<usize, usize> = repeats.iter().map(|(u, e)| (u.start, *e)).collect();
+        let input = self.input();
+        self.unit_table(
+            filter,
+            &["earlier_start", "text"],
+            repeats.into_iter().map(|(u, _)| u).collect(),
+            |u| {
+                vec![
+                    earlier[&u.start].into(),
+                    escape(&input[u.start..u.end], 120).into(),
+                ]
+            },
+        )
+    }
+
+    fn models_table(&self, filter: &Filter) -> Table {
+        let mut table = Table::new(&[
+            "model",
+            "name",
+            "bits",
+            "bits_per_byte",
+            "bits_over_actual",
+            "best_bytes",
+            "best_share",
+        ]);
+        let mut bits = vec![0.; self.m];
+        let mut best = vec![0usize; self.m];
+        let mut actual = 0.;
+        let mut count = 0usize;
+        for (_, s) in self.sections_in(filter) {
+            for o in s.start..s.end() {
+                if !Self::in_range(filter, o, o + 1) {
+                    continue;
+                }
+                count += 1;
+                actual += self.byte_costs[o];
+                let costs = &self.model_byte_costs[o * self.m..(o + 1) * self.m];
+                let mut best_j = 0;
+                for j in 0..self.m {
+                    bits[j] += costs[j] as f64;
+                    if costs[j] < costs[best_j] {
+                        best_j = j;
+                    }
+                }
+                if self.m > 0 {
+                    best[best_j] += 1;
+                }
+            }
+        }
+        table.push(vec![
+            Cell::Empty,
+            "actual (the whole model)".into(),
+            Cell::bits(actual),
+            Cell::Float(actual / count.max(1) as f64, 3),
+            Cell::bits(0.),
+            Cell::Empty,
+            Cell::Empty,
+        ]);
+        for j in 0..self.m {
+            table.push(vec![
+                j.into(),
+                self.data.model_names[j].as_str().into(),
+                Cell::bits(bits[j]),
+                Cell::Float(bits[j] / count.max(1) as f64, 3),
+                Cell::bits(bits[j] - actual),
+                best[j].into(),
+                Cell::Float(best[j] as f64 / count.max(1) as f64, 3),
+            ]);
+        }
+        table
+    }
+
+    fn top(&self, view: View, n: usize, kind: Option<&str>) -> Table {
+        self.view(
+            view,
+            &Filter {
+                top: Some(n),
+                kind: kind.map(str::to_owned),
+                ..Filter::default()
+            },
+        )
+    }
+
+    fn suggestions_table(&self) -> Table {
+        let mut table = Table::new(&["kind", "bits", "start", "end", "message", "query"]);
+        let mut add = |kind: &str,
+                       bits: f64,
+                       range: Option<(usize, usize)>,
+                       message: String,
+                       query: String| {
+            let (start, end) =
+                range.map_or((Cell::Empty, Cell::Empty), |(a, b)| (a.into(), b.into()));
+            table.push(vec![
+                kind.into(),
+                Cell::bits(bits),
+                start,
+                end,
+                message.into(),
+                query.into(),
+            ]);
+        };
+
+        // Files that cost more than storing them as they are.
+        for (i, s) in self.data.sections.iter().enumerate() {
+            if s.length == 0 {
+                continue;
+            }
+            let bits = self.cost(s.start, s.end());
+            if bits > 8. * s.length as f64 && s.kind == "file" {
+                add(
+                    "pre-compress",
+                    bits - 8. * s.length as f64,
+                    Some((s.start, s.end())),
+                    format!(
+                        "'{}' costs {:.0} bytes, more than its {} bytes stored as they are: pass it with --pre-compressed-file instead.",
+                        s.path, bits / 8., s.length
+                    ),
+                    format!("--view blocks --section {i} --top 20"),
+                );
+            }
+        }
+
+        let get = |row: &Vec<Cell>, table: &Table, column: &str| -> Cell {
+            let i = table.columns.iter().position(|c| c == column).unwrap();
+            row[i].clone()
+        };
+        let num = |cell: Cell| match cell {
+            Cell::Int(v) => v as f64,
+            Cell::Float(v, _) => v,
+            _ => 0.,
+        };
+        let text = |cell: Cell| match cell {
+            Cell::Str(s) => s,
+            _ => String::new(),
+        };
+
+        // Identifiers that cost much in total.
+        let idents = self.top(View::TokenTotals, 60, Some("ident"));
+        let mut added = 0;
+        for row in &idents.rows {
+            let (name, count, bits, per) = (
+                text(get(row, &idents, "text")),
+                num(get(row, &idents, "count")),
+                num(get(row, &idents, "bits")),
+                num(get(row, &idents, "bits_per_occurrence")),
+            );
+            if bits < 32. || name.len() < 3 || KEYWORDS.contains(&name.as_str()) || added >= 8 {
+                continue;
+            }
+            added += 1;
+            add(
+                "identifier",
+                bits,
+                None,
+                format!(
+                    "Identifier `{name}` occurs {} and costs {:.1} bytes in total ({per:.1} bits each). If it is a name you chose: a shorter one, one that is already common in the code, or fewer uses may save bytes.",
+                    times(count),
+                    bits / 8.
+                ),
+                format!("--view tokens --kind ident --top 50"),
+            );
+        }
+
+        // Number literals with many digits.
+        let numbers = self.top(View::TokenTotals, 50, Some("number"));
+        let mut added = 0;
+        for row in &numbers.rows {
+            let (literal, count, bits) = (
+                text(get(row, &numbers, "text")),
+                num(get(row, &numbers, "count")),
+                num(get(row, &numbers, "bits")),
+            );
+            let fraction_digits = literal
+                .split_once('.')
+                .map_or(0, |(_, f)| f.bytes().take_while(u8::is_ascii_digit).count());
+            if fraction_digits < 3 || bits < 16. || added >= 5 {
+                continue;
+            }
+            added += 1;
+            add(
+                "number",
+                bits,
+                Some((num(get(row, &numbers, "first_start")) as usize, num(get(row, &numbers, "first_start")) as usize + literal.len())),
+                format!(
+                    "Number `{literal}` ({}) costs {:.1} bytes. Check whether fewer digits are precise enough, or whether a shorter form (e.g. 1e-5) exists.",
+                    times(count),
+                    bits / 8.
+                ),
+                "--view token-totals --kind number --top 30".to_owned(),
+            );
+        }
+
+        // Most expensive places.
+        for unit in self.hotspots(&Filter::default()).into_iter().take(8) {
+            let bits = self.cost(unit.start, unit.end);
+            add(
+                "hotspot",
+                bits,
+                Some((unit.start, unit.end)),
+                format!(
+                    "{} bytes at {} cost {:.1} bytes ({:.2} bits per byte): {}",
+                    unit.end - unit.start,
+                    self.place(&unit),
+                    bits / 8.,
+                    bits / (unit.end - unit.start) as f64,
+                    self.snippet(&unit)
+                ),
+                format!(
+                    "--view {} --range {}..{}",
+                    if self.data.sections[unit.section].text {
+                        "tokens"
+                    } else {
+                        "bytes"
+                    },
+                    unit.start,
+                    unit.end
+                ),
+            );
+        }
+
+        // Repetitions that the model does not predict well.
+        let has_match = config_has(&self.data.config.model, |m| {
+            matches!(m, ModelConfig::MatchPredictor { .. })
+        });
+        let repeats = self.top(View::Repeats, 5, None);
+        for row in &repeats.rows {
+            let (start, end, bits, bpb, earlier) = (
+                num(get(row, &repeats, "start")) as usize,
+                num(get(row, &repeats, "end")) as usize,
+                num(get(row, &repeats, "bits")),
+                num(get(row, &repeats, "bits_per_byte")),
+                num(get(row, &repeats, "earlier_start")) as usize,
+            );
+            if bpb < 1. || bits < 32. {
+                continue;
+            }
+            let hint = if has_match {
+                "The match predictor does not catch it; a larger context or table may help."
+            } else {
+                "The config has no MatchPredictor; adding one (e.g. the 64k size profile) may help."
+            };
+            add(
+                "repeat",
+                bits,
+                Some((start, end)),
+                format!(
+                    "{} bytes at {start} repeat the bytes at {earlier} but still cost {:.1} bytes ({bpb:.2} bits per byte). {hint}",
+                    end - start,
+                    bits / 8.
+                ),
+                format!("--view bytes --range {start}..{end}"),
+            );
+        }
+
+        // Submodels that are rarely the best.
+        if self.m > 0 {
+            let models = self.models_table(&Filter::default());
+            for row in models.rows.iter().skip(1) {
+                let share = num(get(row, &models, "best_share"));
+                if share < 0.01 {
+                    add(
+                        "model",
+                        0.,
+                        None,
+                        format!(
+                            "Submodel {} was the best for {:.1}% of the bytes. Removing it from the config may cost little and makes the decompressor smaller and faster; compress again to check.",
+                            text(get(row, &models, "name")),
+                            share * 100.
+                        ),
+                        "--view models".to_owned(),
+                    );
+                }
+            }
+        }
+
+        table.sort_desc("bits");
+        table
+    }
+
+    pub fn summary(&self, detail_files: &[(String, View, Vec<String>)]) -> Value {
+        let n = self.input().len();
+        let bits: f64 = self.byte_costs.iter().sum();
+        let mut by_kind: HashMap<TokenKind, (usize, usize, f64)> = HashMap::new();
+        for tokens in &self.tokens {
+            for &(start, end, kind) in tokens {
+                let e = by_kind.entry(kind).or_default();
+                e.0 += 1;
+                e.1 += end - start;
+                e.2 += self.cost(start, end);
+            }
+        }
+        let mut kinds: Vec<_> = by_kind.into_iter().collect();
+        kinds.sort_by(|a, b| b.1 .2.total_cmp(&a.1 .2));
+        let token_kinds: Vec<Value> = kinds
+            .into_iter()
+            .map(|(k, (count, length, bits))| {
+                json!({
+                    "kind": k.name(),
+                    "count": count,
+                    "length": length,
+                    "bits": (bits * 100.).round() / 100.,
+                    "bits_per_byte": (bits / length.max(1) as f64 * 1000.).round() / 1000.,
+                })
+            })
+            .collect();
+
+        let compressed = self
+            .data
+            .outputs
+            .iter()
+            .flat_map(|f| &f.parts)
+            .find(|p| p.name == "compressed stream")
+            .map(|p| p.length);
+        let output_size: usize = self.data.outputs.iter().map(|f| f.size).sum();
+
+        let models = if self.m > 0 {
+            json!({
+                "names": self.data.model_names,
+                "summary": self.models_table(&Filter::default()).to_json(),
+            })
+        } else {
+            json!({
+                "names": [],
+                "note": "Submodel predictions were not recorded. Compress with --report-models to get them.",
+            })
+        };
+
+        json!({
+            "about": [
+                "Compression report of rootsqz for analysis. The compressed stream holds the main JavaScript and then each --file, in this order, as sections of one decompressed stream; all offsets (start, end, offset) are byte offsets in that decompressed stream, end is exclusive.",
+                "The model predicts every bit. A bit with predicted probability p costs -log2(p) bits; bits is the sum of that over a range, cost_bytes = bits / 8. The costs add up to the size of the compressed stream, give or take a few bytes.",
+                "The model learns from all bytes before a byte, also across sections, so a byte costs less if similar bytes came before. Reordering or changing earlier bytes changes the cost of later ones.",
+                "encoded_start and encoded_end are positions in the compressed stream before and after a range was coded; arithmetic coding spreads bits over bytes, so they are approximate. Add the offset of the 'compressed stream' part in outputs to get a position in the output file.",
+                "Submodel names are paths in config.model. With --report-models, 'models' tells what each submodel alone would have cost: a submodel can be useful in the mix even if it is bad alone.",
+                "More detail: 'rootsqz report <this directory> --view <view>' prints a view as tab separated rows; see 'views' and 'rootsqz report --help' for filters (--section, --range, --kind, --top, --sort, --min-bits, --models). The suggestions have such a query each.",
+            ],
+            "rootsqz_version": env!("CARGO_PKG_VERSION"),
+            "totals": {
+                "input_bytes": n,
+                "bits": (bits * 100.).round() / 100.,
+                "cost_bytes": (bits / 8. * 100.).round() / 100.,
+                "bits_per_byte": (bits / n.max(1) as f64 * 1000.).round() / 1000.,
+                "compressed_stream_bytes": compressed,
+                "output_bytes": output_size,
+            },
+            "outputs": self.data.outputs,
+            "sections": self.sections_table(&Filter::default()).to_json(),
+            "token_kinds": token_kinds,
+            "suggestions": self.view(View::Suggestions, &Filter { top: Some(25), ..Filter::default() }).to_json(),
+            "top": {
+                "hotspots": self.top(View::Hotspots, 15, None).to_json(),
+                "lines": self.top(View::Lines, 10, None).to_json(),
+                "blocks": self.top(View::Blocks, 10, None).to_json(),
+                "identifiers": self.top(View::TokenTotals, 15, Some("ident")).to_json(),
+                "numbers": self.top(View::TokenTotals, 10, Some("number")).to_json(),
+                "repeats": self.top(View::Repeats, 10, None).to_json(),
+            },
+            "models": models,
+            "views": View::ALL.iter().map(|v| json!({ "view": v.name(), "description": v.description() })).collect::<Vec<_>>(),
+            "detail_files": detail_files.iter().map(|(file, view, columns)| json!({
+                "file": file,
+                "view": view.name(),
+                "columns": columns,
+            })).collect::<Vec<_>>(),
+            "config": self.data.config_json,
+        })
+    }
+
+    // Accessors for the HTML report.
+    pub fn data(&self) -> &ReportData {
+        self.data
+    }
+
+    pub fn byte_costs(&self) -> &[f64] {
+        &self.byte_costs
+    }
+
+    pub fn model_byte_costs(&self) -> &[f32] {
+        &self.model_byte_costs
+    }
+}
+
+fn config_has(config: &ModelConfig, f: impl Fn(&ModelConfig) -> bool + Copy) -> bool {
+    f(config)
+        || match config {
+            ModelConfig::Mixer { models } => models.iter().any(|m| config_has(m, f)),
+            ModelConfig::AdaptiveProbabilityMap(m) => config_has(m, f),
+            _ => false,
+        }
+}
+
+/// Keywords and built-in names of JavaScript and GLSL, which cannot be renamed.
+const KEYWORDS: &[&str] = &[
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "let",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "undefined",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+    "async",
+    "of",
+    "static",
+    "get",
+    "set",
+    "Math",
+    "document",
+    "window",
+    "length",
+    "prototype",
+    "Array",
+    "Object",
+    "Float32Array",
+    "Uint8Array",
+    "Int32Array",
+    "Uint32Array",
+    "float",
+    "int",
+    "uint",
+    "bool",
+    "vec2",
+    "vec3",
+    "vec4",
+    "ivec2",
+    "ivec3",
+    "ivec4",
+    "uvec2",
+    "uvec3",
+    "uvec4",
+    "bvec2",
+    "bvec3",
+    "bvec4",
+    "mat2",
+    "mat3",
+    "mat4",
+    "sampler2D",
+    "sampler3D",
+    "uniform",
+    "varying",
+    "attribute",
+    "out",
+    "inout",
+    "precision",
+    "highp",
+    "mediump",
+    "lowp",
+    "main",
+    "gl_FragColor",
+    "gl_FragCoord",
+    "gl_Position",
+    "gl_VertexID",
+    "texture",
+    "texture2D",
+    "sin",
+    "cos",
+    "tan",
+    "atan",
+    "pow",
+    "exp",
+    "log",
+    "sqrt",
+    "abs",
+    "sign",
+    "floor",
+    "ceil",
+    "fract",
+    "mod",
+    "min",
+    "max",
+    "clamp",
+    "mix",
+    "step",
+    "smoothstep",
+    "length",
+    "distance",
+    "dot",
+    "cross",
+    "normalize",
+    "reflect",
+    "refract",
+];
+
+fn times(count: f64) -> String {
+    if count == 1. {
+        "once".to_owned()
+    } else {
+        format!("{count} times")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{tokenize, TokenKind::*};
+
+    #[test]
+    fn tokenize_js() {
+        let text = b"a1=0x1F+1e-5*.5;  $b";
+        let tokens: Vec<_> = tokenize(text, 10)
+            .into_iter()
+            .map(|(s, e, k)| (std::str::from_utf8(&text[s - 10..e - 10]).unwrap(), k))
+            .collect();
+        assert_eq!(
+            tokens,
+            [
+                ("a1", Ident),
+                ("=", Punct),
+                ("0x1F", Number),
+                ("+", Punct),
+                ("1e-5", Number),
+                ("*", Punct),
+                (".5", Number),
+                (";", Punct),
+                ("  ", Space),
+                ("$b", Ident),
+            ]
+        );
+    }
+}

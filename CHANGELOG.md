@@ -6,6 +6,15 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Added
+- `--report` writes a compression report for analysis, also by an LLM: `report.json` with totals, the layout of the output, the cost of every input file, hotspots, expensive identifiers, numbers and repeated strings, and suggestions. It covers the files given with `--file` as well.
+- `rootsqz report <dir>` prints views of a report as tab separated rows: per section, line, block, hotspot, token, byte or bit, with filters by section, byte range, token kind and cost.
+- `--report-models` records what every submodel predicted, to compare the models of a config.
+- `--report-detail <VIEW,...>` writes views of the report as TSV files at compress time.
+
+### Changed
+- **Breaking:** `--report` writes to `report/` in the output directory instead of `report.html` next to the output. `report.html` shows the cost of every byte in bits, keeps line breaks, covers the `--file` files, and has the summary, the suggestions and details per byte.
+
 ### Fixed
 - `rootsqz web …` works. It failed because the options were also required before the subcommand.
 

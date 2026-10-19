@@ -9,6 +9,10 @@ use std::{
 pub trait Model {
     fn pred(&mut self) -> f64;
     fn learn(&mut self, bit: u8);
+
+    /// Appends the stretched predictions that the submodels made in the last `pred` call,
+    /// depth first, in the order of `ModelConfig::submodel_names`. Used by the report.
+    fn submodel_preds(&self, _out: &mut Vec<f32>) {}
 }
 
 #[derive(Clone, Copy)]
@@ -609,6 +613,13 @@ impl Model for LnMixerPred {
             self.bit_ctx = 1;
         }
     }
+
+    fn submodel_preds(&self, out: &mut Vec<f32>) {
+        for (model, p) in self.models_with_weight.iter().zip(&self.last_p) {
+            out.push(*p as f32);
+            model.model.submodel_preds(out);
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -643,6 +654,7 @@ pub struct AdaptiveProbabilityMap {
     bit_ctx: u32,
 
     input_model: Box<dyn Model>,
+    last_input_p: f64,
 }
 
 impl AdaptiveProbabilityMap {
@@ -660,6 +672,7 @@ impl AdaptiveProbabilityMap {
 
             bit_ctx: 1,
             input_model: input_model,
+            last_input_p: 0.,
         }
     }
 
@@ -686,6 +699,7 @@ impl AdaptiveProbabilityMap {
 impl Model for AdaptiveProbabilityMap {
     fn pred(&mut self) -> f64 {
         let p = self.input_model.pred();
+        self.last_input_p = p;
         let p_ptr = p.max(-8.).min(7.5) * 2.;
         let p_idx_f = p_ptr.floor();
         let p_idx_c = p_ptr.ceil();
@@ -766,5 +780,10 @@ impl Model for AdaptiveProbabilityMap {
         }
 
         self.input_model.learn(bit);
+    }
+
+    fn submodel_preds(&self, out: &mut Vec<f32>) {
+        out.push(self.last_input_p as f32);
+        self.input_model.submodel_preds(out);
     }
 }
