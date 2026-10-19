@@ -6,6 +6,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Added
+- `--loader progress` (`loader: { preset: "progress" }`), a loader with the browser's own progress bar, a `<progress>` element. It is the smallest preset with progress.
+
 ### Changed
 - Every web output is about 180 bytes smaller: the names in the boot code are now minified, it is minified in 3 passes, and deflated with zopfli instead of zlib. The main JavaScript now runs in the global scope, like a script, instead of in a function of the boot code.
 - The loaders are smaller: in the ray tracer test, `--loader bar` adds 256 bytes instead of 369, and `--loader spinner` 197 instead of 221. Outputs with a loader script no longer also contain the synchronous decoder, and leading and trailing whitespace of `--loader-html` is no longer packed.

@@ -122,9 +122,10 @@ export function run(args: string[], options: RunOptions = {}): Promise<void> {
 export type LoaderOptions = {
   /**
    * Built-in loader (`--loader`): `"spinner"`, with the decoder running in one go,
-   * or `"bar"`, a progress bar with the decoder running in slices.
+   * `"bar"`, a progress bar with the decoder running in slices,
+   * or `"progress"`, the browser's own progress bar (a `<progress>` element), also with the decoder running in slices.
    */
-  preset?: "spinner" | "bar";
+  preset?: "spinner" | "bar" | "progress";
 
   /**
    * File with the markup and CSS of the loader (`--loader-html`). It is packed as it is, without minification.

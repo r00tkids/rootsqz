@@ -49,7 +49,7 @@ Notes:
   document.body.insertAdjacentHTML("beforeend", "<canvas id=c>");
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
-- To show a loader while the output decompresses, set `loader: { preset: "spinner" }` or `{ preset: "bar" }`, or your own `{ html, js }` files. See [Loader](https://github.com/r00tkids/rootsqz#loader).
+- To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](https://github.com/r00tkids/rootsqz#loader).
 
 See the [example](https://github.com/r00tkids/rootsqz/tree/main/examples/vite) for a working example with support for `vite-plugin-glsl`.
 
@@ -88,7 +88,7 @@ rootsqz({
     report: false,
 
     /**
-     * Loader shown while the output decompresses: a built-in `preset` ("spinner" or "bar"),
+     * Loader shown while the output decompresses: a built-in `preset` ("spinner", "bar" or "progress"),
      * or your own `html` and `js` files (paths relative to the working directory).
      * `keep` leaves it in place when the bundle runs, so the demo can continue the progress.
      * See https://github.com/r00tkids/rootsqz#loader

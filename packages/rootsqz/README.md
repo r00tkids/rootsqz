@@ -48,7 +48,7 @@ await compress({
     sizeProfile: '64k',
 
     /**
-     * Loader shown while the web output decompresses: `preset` "spinner" or "bar",
+     * Loader shown while the web output decompresses: `preset` "spinner", "bar" or "progress",
      * or your own `html` and `js` files. `keep` leaves it in place when the main JavaScript runs.
      */
     loader: { preset: 'bar' },

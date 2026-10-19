@@ -82,6 +82,8 @@ pub enum LoaderPreset {
     Spinner,
     /// Progress bar, with the decoder running in slices
     Bar,
+    /// The browser's own progress bar (a <progress> element), with the decoder running in slices
+    Progress,
 }
 
 impl Args {
@@ -103,6 +105,10 @@ impl Args {
             Some(LoaderPreset::Bar) => (
                 Some(include_str!("web/templates/web/loaders/bar.html").to_owned()),
                 Some(include_str!("web/templates/web/loaders/bar.js").to_owned()),
+            ),
+            Some(LoaderPreset::Progress) => (
+                Some(include_str!("web/templates/web/loaders/progress.html").to_owned()),
+                Some(include_str!("web/templates/web/loaders/progress.js").to_owned()),
             ),
             None => (read(&self.loader_html)?, read(&self.loader_js)?),
         };

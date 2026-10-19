@@ -99,7 +99,7 @@ export type RootsqzOptions = {
   report?: boolean;
 
   /**
-   * Loader shown while the output decompresses: a built-in `preset` ("spinner" or "bar"),
+   * Loader shown while the output decompresses: a built-in `preset` ("spinner", "bar" or "progress"),
    * or your own `html` and `js` files. `keep` leaves it in place when the bundle runs.
    * Paths are relative to the working directory.
    */

@@ -55,7 +55,7 @@ Options:
 - `--size-profile <4k|64k>`: Embedded compression preset (default: `4k`). The `64k` preset adds a bounded match predictor for larger JavaScript inputs.
 - `--brotli`: Use native Brotli decoding for web inputs (Firefox 147+ / Safari 18.4+).
 - `--config <file.json>`: Use a complete JSON `CompressConfig` instead of the embedded preset. This takes precedence over `--size-profile`.
-- `--loader <spinner|bar>`, `--loader-html <file>`, `--loader-js <file>`, `--loader-keep`: Show a loader while the web output decompresses, see [Loader](#loader).
+- `--loader <spinner|bar|progress>`, `--loader-html <file>`, `--loader-js <file>`, `--loader-keep`: Show a loader while the web output decompresses, see [Loader](#loader).
 - See `rootsqz --help` for more CLI options
 
 Both presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json) or [the 64k preset](src/compressor/size_64k_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, and `{"type":"IndirectByte","context_bytes":2,"max_count":15}`. The decoder is generated from the selected config.
@@ -71,6 +71,7 @@ The web output can show a loader while it decompresses. Without loader options, 
 
 - `--loader spinner`: A spinning ring. The decoder runs in one go.
 - `--loader bar`: A progress bar. The decoder runs in slices.
+- `--loader progress`: The browser's own progress bar, a `<progress>` element, so it looks different in each browser. The decoder runs in slices. It is the smallest preset with progress.
 - `--loader-html <file>`: Your own markup and CSS, e.g. `<style>…</style><div id=l></div>`. It is packed as it is, without minification, so keep it compact. Scripts in it do not run.
 - `--loader-js <file>`: Your own script. It runs after the markup is inserted, so it can use it. Set `rsqz.progress` in it:
   ```js
@@ -133,7 +134,7 @@ Notes:
   document.body.insertAdjacentHTML("beforeend", "<canvas id=c>");
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
-- To show a loader while the output decompresses, set `loader: { preset: "spinner" }` or `{ preset: "bar" }`, or your own `{ html, js }` files. See [Loader](#loader).
+- To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader).
 
 See the [plugin README](packages/rollup-plugin-rootsqz) for all options and [examples/vite](examples/vite) for a working project with `vite-plugin-glsl`.
 
