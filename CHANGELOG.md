@@ -6,6 +6,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-20
+
 ### Added
 - A loader for the web output, shown while it decompresses: `--loader spinner` or `--loader bar`, or your own `--loader-html <file>` and `--loader-js <file>`. The script gets the progress through `rsqz.progress = (done, total) => ...`. `--loader-keep` keeps the loader when the main JavaScript runs, so the demo can continue the progress bar. Outputs without a loader don't change.
 - The `loader` option of `compress` and of the plugin, e.g. `loader: { preset: "bar" }` or `loader: { html: "loader.html", js: "loader.js", keep: true }`, with the type `LoaderOptions`.
@@ -76,6 +78,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.6.0]: https://github.com/r00tkids/rootsqz/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/r00tkids/rootsqz/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/r00tkids/rootsqz/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/r00tkids/rootsqz/compare/v0.4.2...v0.4.3

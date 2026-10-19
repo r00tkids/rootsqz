@@ -1,6 +1,6 @@
 {
   "name": "@r00tkids/rootsqz-linux-arm64",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "The aarch64-unknown-linux-musl executable of rootsqz.",
   "license": "MIT",
   "repository": {
