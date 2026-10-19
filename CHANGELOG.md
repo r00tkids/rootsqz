@@ -7,6 +7,7 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 ## [Unreleased]
 
 ### Changed
+- Every web output is about 130 bytes smaller: the names in the boot code are now minified. The main JavaScript now runs in the global scope, like a script, instead of in a function of the boot code.
 - Outputs with a loader script (`--loader bar`, `--loader-js`) are about 70 bytes smaller: they no longer also contain the synchronous decoder.
 
 ## [0.6.0] - 2026-10-20

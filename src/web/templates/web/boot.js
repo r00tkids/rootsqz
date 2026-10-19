@@ -19,7 +19,7 @@ p.slice(o).arrayBuffer().then(b => {
         document.body.innerHTML = "";
         {{/unless}}
         s = new TextDecoder().decode(d.slice(0, {{{js_main_len}}}));
-        eval(s);
+        window.eval(s);
     }));
 });
 {{else}}
@@ -31,6 +31,6 @@ p.slice(o).arrayBuffer().then(b => {
         files: {{{files_map}}}
     };
     s = new TextDecoder().decode(d.slice(0, {{{js_main_len}}}));
-    eval(s);
+    window.eval(s);
 });
 {{/if}}
