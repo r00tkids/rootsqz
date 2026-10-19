@@ -6,6 +6,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-20
+
 ### Added
 - `--report` writes a compression report for analysis, also by an LLM: `report.json` with totals, the layout of the output, the cost of every input file, hotspots, expensive identifiers, numbers and repeated strings, and suggestions. It covers the files given with `--file` as well.
 - `rootsqz install-skill [DIR]` installs the agent skill `rootsqz-report` into a project (`.claude/skills` and `.agents/skills`). It teaches coding agents to make a compression report, read it, and check that a change saves bytes. Each report directory also gets an `AGENTS.md` (and a `CLAUDE.md` that imports it) about that report.
@@ -104,6 +106,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.8.0]: https://github.com/r00tkids/rootsqz/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/r00tkids/rootsqz/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/r00tkids/rootsqz/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/r00tkids/rootsqz/compare/v0.5.0...v0.5.1
