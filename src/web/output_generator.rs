@@ -423,8 +423,9 @@ pub fn render_output(
                         "files_map": files_map,
                         "js_main_len": js_main_len,
                         "loader": loader.is_some(),
+                        // Trimmed, as the trailing newline of a file would be packed as well
                         "loader_html": serde_json::to_string(
-                            loader.as_ref().and_then(|loader| loader.html.as_deref()).unwrap_or("")
+                            loader.as_ref().and_then(|loader| loader.html.as_deref()).unwrap_or("").trim()
                         )?,
                         "loader_js": loader.as_ref().and_then(|loader| loader.js.as_deref()),
                         "keep": loader.as_ref().is_some_and(|loader| loader.keep),

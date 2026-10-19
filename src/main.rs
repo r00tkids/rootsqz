@@ -308,10 +308,11 @@ let progress = [];
 globalThis.rsqz = {{ progress: (done, total) => progress.push([done, total]) }};
 {}
 {}
-let output = await decompressSliced(model, new Uint8Array(fs.readFileSync(import.meta.dirname + "/input.pack")), {}, {});
-fs.writeFileSync(import.meta.dirname + "/output.bin", output);
-fs.writeFileSync(import.meta.dirname + "/progress.json", JSON.stringify(progress));
-process.exit(0);
+decompressSliced(model, new Uint8Array(fs.readFileSync(import.meta.dirname + "/input.pack")), {}, {}, output => {{
+    fs.writeFileSync(import.meta.dirname + "/output.bin", output);
+    fs.writeFileSync(import.meta.dirname + "/progress.json", JSON.stringify(progress));
+    process.exit(0);
+}});
 "#,
             generate_js_decompression_code(
                 &model_config.model,

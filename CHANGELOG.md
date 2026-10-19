@@ -8,7 +8,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ### Changed
 - Every web output is about 130 bytes smaller: the names in the boot code are now minified. The main JavaScript now runs in the global scope, like a script, instead of in a function of the boot code.
-- Outputs with a loader script (`--loader bar`, `--loader-js`) are about 70 bytes smaller: they no longer also contain the synchronous decoder.
+- The loaders are smaller: in the ray tracer test, `--loader bar` adds 256 bytes instead of 369, and `--loader spinner` 197 instead of 221. Outputs with a loader script no longer also contain the synchronous decoder, and leading and trailing whitespace of `--loader-html` is no longer packed.
+- `rsqz.progress` is first called after the first slice of decoding, no longer with 0 before it starts.
 
 ## [0.6.0] - 2026-10-20
 

@@ -1,7 +1,7 @@
 
 // Decodes like decompress (decompress.js), but in slices of about 12 ms, so the browser can paint in between.
-// Calls rsqz.progress(done, total), if set, after each slice. Resolves to the decoded bytes.
-let decompressSliced = (model, data, encodedLen, decodedLen) => new Promise(resolve => {
+// Calls rsqz.progress(done, total), if set, after each slice, and then done with the decoded bytes.
+let decompressSliced = (model, data, encodedLen, decodedLen, done) => {
     let decoder = ArithmeticDecoder(data, encodedLen);
     let output = new Uint8Array(decodedLen);
     let byteIdx = 0;
@@ -21,8 +21,7 @@ let decompressSliced = (model, data, encodedLen, decodedLen) => new Promise(reso
             if (!(byteIdx & 255) && performance.now() > sliceEnd) break;
         }
         rsqz.progress?.(byteIdx, decodedLen);
-        if (byteIdx < decodedLen) channel.port2.postMessage(0);
-        else resolve(output);
+        byteIdx < decodedLen ? channel.port2.postMessage(0) : done(output);
     };
     channel.port2.postMessage(0);
-});
+};

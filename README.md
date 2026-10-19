@@ -78,7 +78,7 @@ The web output can show a loader while it decompresses. Without loader options, 
       document.querySelector("#l").style.width = done / total * 100 + "%";
   };
   ```
-  It is called with `0` before decoding, then with the number of decoded bytes after each slice of about 12 ms, and with `total` at the end.
+  It is called with the number of decoded bytes after each slice of about 12 ms, and with `total` at the end.
 - `--loader-keep`: Keep the loader when the main JavaScript runs. By default the page is cleared first. With it, the demo can continue a progress bar during its own precalculation by calling `rsqz.progress` itself, and removes the loader when done.
 
 `--loader` cannot be combined with `--loader-html` or `--loader-js`; to change a preset, copy it from [src/web/templates/web/loaders](src/web/templates/web/loaders). Loaders are only for the `web` target without `--brotli`.

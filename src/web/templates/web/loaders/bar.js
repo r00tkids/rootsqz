@@ -1,3 +1,2 @@
-rsqz.progress = (done, total) => {
-    document.querySelector("#rsqz-loader div").style.width = done / total * 100 + "%";
-};
+let bar = document.querySelector("#L *");
+rsqz.progress = (done, total) => bar.style.width = done / total * 100 + "%";
