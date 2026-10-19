@@ -12,6 +12,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 - `--report-models` records what every submodel predicted, to compare the models of a config.
 - `--report-detail <VIEW,...>` writes views of the report as TSV files at compress time.
 - The Node API and the plugin have the options `reportModels` and `reportDetail`. The Node API exports the type `ReportView`.
+- `--report-source-map <FILE>` maps the costs of the main JavaScript back to its original source files and lines, with the views `sources` and `source-lines`. `--report-label <FILE>=<LABEL>` names a file in the report. The Node API has the options `reportSourceMap` and `reportLabels`.
+- With `report`, the plugin passes the source map of the bundle and names the imported files by their module in the report. It turns on `sourcemap: "hidden"` for that if no source map is set.
 
 ### Changed
 - **Breaking:** `--report` writes to `report/` in the output directory instead of `report.html` next to the output. `report.html` shows the cost of every byte in bits, keeps line breaks, covers the `--file` files, and has the summary, the suggestions and details per byte.

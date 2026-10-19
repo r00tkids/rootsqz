@@ -97,6 +97,8 @@ export type RootsqzOptions = {
    * Write a compression report to `rootsqz-output/report/` (`--report`):
    * `report.json` (a summary for analysis, also by an LLM), `report.html` and `data.bin`,
    * which `rootsqz report <dir>` queries.
+   * The report names the imported files by their module and maps the bundle back to its
+   * original sources. For that, the plugin turns on `sourcemap: "hidden"` if no source map is set.
    */
   report?: boolean;
 
@@ -165,7 +167,8 @@ export type RootsqzOptions = {
  * @throws If `brotli` is combined with `config`, a report option or the `64k` size profile.
  */
 export default function (options: RootsqzOptions = {}): Plugin {
-  if (options.brotli && (options.config || options.report || options.reportModels || options.reportDetail?.length || options.sizeProfile === "64k")) {
+  const wantsReport = Boolean(options.report || options.reportModels || options.reportDetail?.length);
+  if (options.brotli && (options.config || wantsReport || options.sizeProfile === "64k")) {
     throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
   }
 
@@ -186,6 +189,8 @@ export default function (options: RootsqzOptions = {}): Plugin {
   });
 
   const files = new Map<string, RootSqzFile>();
+  // Whether the plugin turned on the source map for the report, so it removes the file again
+  let addedSourcemap = false;
   let fileNameIdx = 0;
 
   const findNextAvailableFileName = () => {
@@ -237,6 +242,14 @@ export default function (options: RootsqzOptions = {}): Plugin {
 
   return {
     name: "rollup-plugin-rootsqz",
+
+    outputOptions(outputOptions: OutputOptions) {
+      if (isBuild && wantsReport && !outputOptions.sourcemap) {
+        addedSourcemap = true;
+        return { ...outputOptions, sourcemap: "hidden" };
+      }
+      return null;
+    },
 
     load: {
       order: "pre",
@@ -322,6 +335,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
 
         const filesToCompress = [];
         const preCompressedFiles = [];
+        const reportLabels: Record<string, string> = {};
 
         // Files are registered when they're loaded, so leave out the ones whose import was tree-shaken away
         const renderedIds = new Set(
@@ -345,6 +359,9 @@ export default function (options: RootsqzOptions = {}): Plugin {
           await fs.mkdir(path.dirname(outPath), { recursive: true });
           await fs.writeFile(outPath, file.content);
 
+          const qIdx = id.indexOf("?");
+          reportLabels[path.relative(".", outPath)] = path.relative(".", qIdx === -1 ? id : id.slice(0, qIdx));
+
           if (file.isCompressed) {
             preCompressedFiles.push(path.relative(".", outPath));
           } else {
@@ -355,12 +372,26 @@ export default function (options: RootsqzOptions = {}): Plugin {
         // Sort by file extension for better compression ratios in rootsqz
         filesToCompress.sort((a, b) => Math.sign(a.fileExt.localeCompare(b.fileExt)) + 2 * (a.isText === b.isText ? 0 : a.isText ? -1 : 1));
 
+        const jsMain = path.resolve(outputOptions.dir || "", jsFileName);
+        reportLabels[jsMain] = path.relative(".", jsMain);
+        let reportSourceMap: string | undefined;
+        if (wantsReport && jsChunk.map) {
+          // Write the source map with absolute source paths, as they are relative to the bundle
+          const sourceMap = { ...jsChunk.map, sources: jsChunk.map.sources.map(source =>
+            source.startsWith("\0") || /^[a-z][a-z0-9+.-]*:/i.test(source)
+              ? source
+              : path.resolve(path.dirname(jsMain), source)) };
+          reportSourceMap = path.resolve(outputOptions.dir || "", "rootsqz-tmp", "main.js.map");
+          await fs.mkdir(path.dirname(reportSourceMap), { recursive: true });
+          await fs.writeFile(reportSourceMap, JSON.stringify(sourceMap));
+          if (addedSourcemap) {
+            await fs.rm(`${jsMain}.map`, { force: true });
+          }
+        }
+
         await compress({
           binaryPath: options.rootsqzPath,
-          jsMain: path.resolve(
-            outputOptions.dir || "",
-            jsFileName,
-          ),
+          jsMain,
           files: filesToCompress.map(f => f.path),
           preCompressedFiles: preCompressedFiles,
           outputDirectory: path.resolve(
@@ -374,6 +405,8 @@ export default function (options: RootsqzOptions = {}): Plugin {
           loader: options.loader,
           reportModels: options.reportModels,
           reportDetail: options.reportDetail,
+          reportSourceMap,
+          reportLabels: wantsReport ? reportLabels : undefined,
           extraArgs: options.rootsqzArgs,
         });
 

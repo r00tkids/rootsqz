@@ -59,6 +59,8 @@ Options:
 - `--report`, `-r`: Write a [compression report](#compression-report) to `report/` in the output directory.
 - `--report-models`: Also record what every submodel predicted (implies `--report`).
 - `--report-detail <VIEW,...>`: Also write these views of the report as TSV files, e.g. `lines,tokens` (implies `--report`).
+- `--report-source-map <FILE>`: Source map of the main JavaScript, to map its costs back to the original source files and lines (implies `--report`).
+- `--report-label <FILE>=<LABEL>`: Name of a file in the report, e.g. the module it was made from. Repeat the option for each file (implies `--report`).
 - See `rootsqz --help` for more CLI options
 
 Both presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json) or [the 64k preset](src/compressor/size_64k_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, and `{"type":"IndirectByte","context_bytes":2,"max_count":15}`. The decoder is generated from the selected config.
@@ -80,7 +82,9 @@ rootsqz report out --view tokens --range 1200..1400       # byte offsets in the 
 rootsqz report out --view lines --section shader.glsl --sort bits
 rootsqz report out --view bits --range 1200..1201 --models
 ```
-The views are `summary`, `sections`, `lines`, `blocks`, `hotspots`, `tokens`, `token-totals`, `bytes`, `bits`, `repeats`, `models` and `suggestions`; `rootsqz report --help` lists the filters. `--report-detail` writes the same views as files at compress time.
+The views are `summary`, `sections`, `lines`, `blocks`, `hotspots`, `tokens`, `token-totals`, `bytes`, `bits`, `repeats`, `models`, `sources`, `source-lines` and `suggestions`; `rootsqz report --help` lists the filters. `--report-detail` writes the same views as files at compress time.
+
+With `--report-source-map`, the report tells which original source files and lines the bytes of a bundled main JavaScript come from (`--view sources`, `--view source-lines`, `--source`). The [plugin](#vite--rollup-plugin) passes the source map and the module names of the imported files by itself.
 
 With `--report-models`, the report also tells what each submodel of the mixer alone would have cost, for every byte and in total (`--view models`, `--models`). This helps to tune a `--config`. It needs 32 bytes of memory and disk per input byte and submodel.
 
@@ -159,6 +163,7 @@ Notes:
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
 - To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader).
+- With `report: true`, the plugin writes a [compression report](#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set.
 
 See the [plugin README](packages/rollup-plugin-rootsqz) for all options and [examples/vite](examples/vite) for a working project with `vite-plugin-glsl`.
 

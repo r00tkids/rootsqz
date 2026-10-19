@@ -227,6 +227,18 @@ export type CompressOptions = RunOptions & {
   reportDetail?: ReportView[];
 
   /**
+   * Source map of `jsMain` (`--report-source-map`), to tell in the report which original
+   * source files and lines its bytes come from. Implies `report`.
+   */
+  reportSourceMap?: string;
+
+  /**
+   * Names of files in the report, by their path as given in `jsMain` or `files`
+   * (`--report-label <file>=<label>`), e.g. the module a bundler made a file from. Implies `report`.
+   */
+  reportLabels?: Record<string, string>;
+
+  /**
    * Loader shown while the web output decompresses (`--loader`, `--loader-html`, `--loader-js`, `--loader-keep`).
    */
   loader?: LoaderOptions;
@@ -238,7 +250,13 @@ export type CompressOptions = RunOptions & {
 };
 
 function wantsReport(options: CompressOptions): boolean {
-  return Boolean(options.report || options.reportModels || options.reportDetail?.length);
+  return Boolean(
+    options.report ||
+      options.reportModels ||
+      options.reportDetail?.length ||
+      options.reportSourceMap ||
+      Object.keys(options.reportLabels ?? {}).length,
+  );
 }
 
 /**
@@ -294,6 +312,12 @@ export function compressArgs(options: CompressOptions): string[] {
   }
   if (options.reportDetail?.length) {
     args.push("--report-detail", options.reportDetail.join(","));
+  }
+  if (options.reportSourceMap) {
+    args.push("--report-source-map", options.reportSourceMap);
+  }
+  for (const [file, label] of Object.entries(options.reportLabels ?? {})) {
+    args.push("--report-label", `${file}=${label}`);
   }
   args.push(...(options.extraArgs ?? []));
 

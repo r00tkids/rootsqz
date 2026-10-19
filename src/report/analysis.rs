@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use serde_json::{json, Value};
 
 use super::{
     query::{Filter, Sort},
+    source_map::SourcePos,
     table::{escape, Cell, Table},
     ReportData, Section,
 };
@@ -34,6 +35,10 @@ pub enum View {
     Repeats,
     /// One row per submodel: what it alone would have cost (needs --report-models)
     Models,
+    /// One row per original source file of the main JavaScript (needs --report-source-map)
+    Sources,
+    /// One row per line of an original source file (needs --report-source-map)
+    SourceLines,
     /// Candidates worth looking into
     Suggestions,
 }
@@ -52,6 +57,8 @@ impl View {
             View::Bits => "bits",
             View::Repeats => "repeats",
             View::Models => "models",
+            View::Sources => "sources",
+            View::SourceLines => "source-lines",
             View::Suggestions => "suggestions",
         }
     }
@@ -69,11 +76,13 @@ impl View {
             View::Bits => "one row per bit: the bit, the predicted p(1) and its cost; bit 0 is the most significant",
             View::Repeats => "byte strings of 8 or more bytes that occurred before, with what they cost again",
             View::Models => "one row per submodel: bits it alone would have cost, and for how many bytes it was the best",
+            View::Sources => "one row per original source file of the main JavaScript: the bytes of the main JavaScript that come from it and their cost (needs --report-source-map)",
+            View::SourceLines => "one row per line of an original source file: the bytes of the main JavaScript that come from it and their cost (needs --report-source-map)",
             View::Suggestions => "candidates worth looking into, largest cost first",
         }
     }
 
-    pub const ALL: [View; 12] = [
+    pub const ALL: [View; 14] = [
         View::Summary,
         View::Sections,
         View::Lines,
@@ -85,6 +94,8 @@ impl View {
         View::Bits,
         View::Repeats,
         View::Models,
+        View::Sources,
+        View::SourceLines,
         View::Suggestions,
     ];
 }
@@ -239,6 +250,23 @@ impl<'a> Analysis<'a> {
         }
     }
 
+    fn source_pos(&self, offset: usize) -> Option<SourcePos> {
+        self.data
+            .source_mapping
+            .as_ref()
+            .and_then(|m| m.positions.get(offset).copied().flatten())
+    }
+
+    fn source_path(&self, source: u32) -> &str {
+        &self.data.source_mapping.as_ref().unwrap().sources[source as usize].path
+    }
+
+    /// `path:line` of the original source of `offset`, if known.
+    fn source_place(&self, offset: usize) -> Option<String> {
+        self.source_pos(offset)
+            .map(|p| format!("{}:{}", self.source_path(p.source), p.line))
+    }
+
     fn input(&self) -> &[u8] {
         &self.data.recording.input
     }
@@ -366,9 +394,25 @@ impl<'a> Analysis<'a> {
         units
     }
 
+    /// Whether a section holds code, in which identifiers are names that can be changed.
+    fn is_code(&self, section: usize) -> bool {
+        const CODE: &[&str] = &[
+            "js", "mjs", "cjs", "ts", "glsl", "frag", "vert", "comp", "wgsl", "hlsl",
+        ];
+        let s = &self.data.sections[section];
+        s.kind == "main"
+            || Path::new(s.name())
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| CODE.contains(&e))
+    }
+
     fn token_list(&self, filter: &Filter) -> Vec<(Unit, TokenKind)> {
         let mut units = Vec::new();
-        for (i, _) in self.sections_in(filter) {
+        for (i, _) in self
+            .sections_in(filter)
+            .filter(|(i, _)| !filter.code_only || self.is_code(*i))
+        {
             for &(start, end, kind) in &self.tokens[i] {
                 if filter.kind.as_deref().map_or(true, |k| k == kind.name()) {
                     units.push((
@@ -399,8 +443,8 @@ impl<'a> Analysis<'a> {
     fn place(&self, unit: &Unit) -> String {
         let s = &self.data.sections[unit.section];
         match self.line_col(unit.section, unit.start) {
-            Some((line, col)) => format!("{}:{line}:{col}", s.path),
-            None => format!("{} +{}", s.path, unit.start - s.start),
+            Some((line, col)) => format!("{}:{line}:{col}", s.name()),
+            None => format!("{} +{}", s.name(), unit.start - s.start),
         }
     }
 
@@ -462,6 +506,10 @@ impl<'a> Analysis<'a> {
     ) -> Table {
         let mut columns: Vec<String> = Self::UNIT_COLUMNS.iter().map(|c| c.to_string()).collect();
         columns.extend(extra.iter().map(|c| c.to_string()));
+        let mapped = self.data.source_mapping.is_some();
+        if mapped {
+            columns.extend(["source".to_owned(), "source_line".to_owned()]);
+        }
         columns.extend(self.model_columns(filter));
         let mut table = Table {
             columns,
@@ -471,8 +519,20 @@ impl<'a> Analysis<'a> {
             if !Self::in_range(filter, unit.start, unit.end) {
                 continue;
             }
+            let pos = self.source_pos(unit.start);
+            if filter.source.is_some() && pos.map(|p| p.source as usize) != filter.source {
+                continue;
+            }
             let mut row = self.unit_cells(&unit);
             row.extend(extra_cells(&unit));
+            if mapped {
+                match pos {
+                    Some(p) => {
+                        row.extend([self.source_path(p.source).into(), (p.line as usize).into()])
+                    }
+                    None => row.extend([Cell::Empty, Cell::Empty]),
+                }
+            }
             row.extend(self.model_cells(filter, &unit));
             table.rows.push(row);
         }
@@ -569,6 +629,8 @@ impl<'a> Analysis<'a> {
             View::Bits => (self.bits_table(filter), Sort::Offset),
             View::Repeats => (self.repeats_table(filter), Sort::Bits),
             View::Models => (self.models_table(filter), Sort::Offset),
+            View::Sources => (self.sources_table(filter, false), Sort::Bits),
+            View::SourceLines => (self.sources_table(filter, true), Sort::Offset),
             View::Suggestions => (self.suggestions_table(), Sort::Bits),
         };
 
@@ -599,6 +661,7 @@ impl<'a> Analysis<'a> {
         let mut table = Table::new(&[
             "index",
             "path",
+            "label",
             "kind",
             "text",
             "start",
@@ -622,6 +685,7 @@ impl<'a> Analysis<'a> {
             table.push(vec![
                 i.into(),
                 s.path.as_str().into(),
+                s.label.as_deref().map_or(Cell::Empty, Cell::from),
                 s.kind.as_str().into(),
                 Cell::Bool(s.text),
                 s.start.into(),
@@ -641,6 +705,105 @@ impl<'a> Analysis<'a> {
                     Cell::Empty
                 },
             ]);
+        }
+        table
+    }
+
+    /// Costs by original source file, or by line of it with `by_line`.
+    fn sources_table(&self, filter: &Filter, by_line: bool) -> Table {
+        let mut table = Table::new(if by_line {
+            &[
+                "source",
+                "path",
+                "line",
+                "length",
+                "bits",
+                "bits_per_byte",
+                "first_start",
+                "text",
+            ]
+        } else {
+            &[
+                "source",
+                "path",
+                "length",
+                "bits",
+                "cost_bytes",
+                "bits_per_byte",
+                "share",
+                "first_start",
+            ]
+        });
+        let Some(mapping) = &self.data.source_mapping else {
+            return table;
+        };
+        // Key: source index (u32::MAX for unmapped bytes) and line (0 for whole files).
+        let mut totals: std::collections::BTreeMap<(u32, u32), (usize, f64, usize)> =
+            Default::default();
+        let main = &self.data.sections[0];
+        if filter.section.map_or(false, |s| s != 0) {
+            return table;
+        }
+        let total_bits: f64 = self.byte_costs.iter().sum();
+        for o in main.start..main.end() {
+            if !Self::in_range(filter, o, o + 1) {
+                continue;
+            }
+            let pos = mapping.positions[o];
+            if filter.source.is_some() && pos.map(|p| p.source as usize) != filter.source {
+                continue;
+            }
+            let key = match pos {
+                Some(p) => (p.source, if by_line { p.line } else { 0 }),
+                None => (u32::MAX, 0),
+            };
+            let e = totals.entry(key).or_insert((0, 0., o));
+            e.0 += 1;
+            e.1 += self.byte_costs[o];
+        }
+        for ((source, line), (length, bits, first)) in totals {
+            let (index, path) = if source == u32::MAX {
+                (Cell::Empty, "(not mapped)".to_owned())
+            } else {
+                (
+                    (source as usize).into(),
+                    mapping.sources[source as usize].path.clone(),
+                )
+            };
+            let bpb = Cell::Float(bits / length as f64, 3);
+            if by_line {
+                let text = (source != u32::MAX)
+                    .then(|| mapping.sources[source as usize].content.as_deref())
+                    .flatten()
+                    .and_then(|c| c.lines().nth(line as usize - 1))
+                    .map_or(Cell::Empty, |l| escape(l.trim().as_bytes(), 160).into());
+                let line = if source == u32::MAX {
+                    Cell::Empty
+                } else {
+                    (line as usize).into()
+                };
+                table.push(vec![
+                    index,
+                    path.into(),
+                    line,
+                    length.into(),
+                    Cell::bits(bits),
+                    bpb,
+                    first.into(),
+                    text,
+                ]);
+            } else {
+                table.push(vec![
+                    index,
+                    path.into(),
+                    length.into(),
+                    Cell::bits(bits),
+                    Cell::bits(bits / 8.),
+                    bpb,
+                    Cell::Float(bits / total_bits.max(1e-9), 3),
+                    first.into(),
+                ]);
+            }
         }
         table
     }
@@ -857,6 +1020,7 @@ impl<'a> Analysis<'a> {
             &Filter {
                 top: Some(n),
                 kind: kind.map(str::to_owned),
+                code_only: kind == Some("ident"),
                 ..Filter::default()
             },
         )
@@ -894,7 +1058,7 @@ impl<'a> Analysis<'a> {
                     Some((s.start, s.end())),
                     format!(
                         "'{}' costs {:.0} bytes, more than its {} bytes stored as they are: pass it with --pre-compressed-file instead.",
-                        s.path, bits / 8., s.length
+                        s.name(), bits / 8., s.length
                     ),
                     format!("--view blocks --section {i} --top 20"),
                 );
@@ -914,6 +1078,31 @@ impl<'a> Analysis<'a> {
             Cell::Str(s) => s,
             _ => String::new(),
         };
+
+        // Original sources that cost the most.
+        let sources = self.top(View::Sources, 5, None);
+        for row in &sources.rows {
+            let (path, bits, share, bpb) = (
+                text(get(row, &sources, "path")),
+                num(get(row, &sources, "bits")),
+                num(get(row, &sources, "share")),
+                num(get(row, &sources, "bits_per_byte")),
+            );
+            if share < 0.05 {
+                continue;
+            }
+            add(
+                "source",
+                bits,
+                None,
+                format!(
+                    "The code from {path} costs {:.0} bytes, {:.0}% of the stream ({bpb:.2} bits per byte).",
+                    bits / 8.,
+                    share * 100.
+                ),
+                format!("--view source-lines --source {path} --top 30"),
+            );
+        }
 
         // Identifiers that cost much in total.
         let idents = self.top(View::TokenTotals, 60, Some("ident"));
@@ -979,9 +1168,11 @@ impl<'a> Analysis<'a> {
                 bits,
                 Some((unit.start, unit.end)),
                 format!(
-                    "{} bytes at {} cost {:.1} bytes ({:.2} bits per byte): {}",
+                    "{} bytes at {}{} cost {:.1} bytes ({:.2} bits per byte): {}",
                     unit.end - unit.start,
                     self.place(&unit),
+                    self.source_place(unit.start)
+                        .map_or(String::new(), |p| format!(" (from {p})")),
                     bits / 8.,
                     bits / (unit.end - unit.start) as f64,
                     self.snippet(&unit)
@@ -1112,6 +1303,7 @@ impl<'a> Analysis<'a> {
                 "The model predicts every bit. A bit with predicted probability p costs -log2(p) bits; bits is the sum of that over a range, cost_bytes = bits / 8. The costs add up to the size of the compressed stream, give or take a few bytes.",
                 "The model learns from all bytes before a byte, also across sections, so a byte costs less if similar bytes came before. Reordering or changing earlier bytes changes the cost of later ones.",
                 "encoded_start and encoded_end are positions in the compressed stream before and after a range was coded; arithmetic coding spreads bits over bytes, so they are approximate. Add the offset of the 'compressed stream' part in outputs to get a position in the output file.",
+                "With --report-source-map, 'sources' and 'top.source_lines' tell which original source files and lines the bytes of the main JavaScript come from, and the views of byte ranges have the columns source and source_line (of their first byte).",
                 "Submodel names are paths in config.model. With --report-models, 'models' tells what each submodel alone would have cost: a submodel can be useful in the mix even if it is bad alone.",
                 "More detail: 'rootsqz report <this directory> --view <view>' prints a view as tab separated rows; see 'views' and 'rootsqz report --help' for filters (--section, --range, --kind, --top, --sort, --min-bits, --models). The suggestions have such a query each.",
             ],
@@ -1127,6 +1319,12 @@ impl<'a> Analysis<'a> {
             "outputs": self.data.outputs,
             "sections": self.sections_table(&Filter::default()).to_json(),
             "token_kinds": token_kinds,
+            "source_map": self.data.source_mapping.as_ref().map(|m| json!({
+                "file": m.map_path,
+                "sources": m.sources.len(),
+                "mapped_bytes": m.positions.iter().filter(|p| p.is_some()).count(),
+            })),
+            "sources": self.top(View::Sources, 30, None).to_json(),
             "suggestions": self.view(View::Suggestions, &Filter { top: Some(25), ..Filter::default() }).to_json(),
             "top": {
                 "hotspots": self.top(View::Hotspots, 15, None).to_json(),
@@ -1135,6 +1333,7 @@ impl<'a> Analysis<'a> {
                 "identifiers": self.top(View::TokenTotals, 15, Some("ident")).to_json(),
                 "numbers": self.top(View::TokenTotals, 10, Some("number")).to_json(),
                 "repeats": self.top(View::Repeats, 10, None).to_json(),
+                "source_lines": self.top(View::SourceLines, 15, None).to_json(),
             },
             "models": models,
             "views": View::ALL.iter().map(|v| json!({ "view": v.name(), "description": v.description() })).collect::<Vec<_>>(),

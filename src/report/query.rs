@@ -23,6 +23,11 @@ pub struct Args {
     #[arg(short, long, value_parser = parse_range)]
     pub range: Option<(usize, usize)>,
 
+    /// Only rows whose first byte comes from this original source: its index, or its path or the
+    /// end of the path (needs --report-source-map)
+    #[arg(long)]
+    pub source: Option<String>,
+
     /// Only tokens of this kind (ident, number, space, punct, other)
     #[arg(long)]
     pub kind: Option<String>,
@@ -64,6 +69,7 @@ pub enum Sort {
 #[derive(Debug, Clone)]
 pub struct Filter {
     pub section: Option<usize>,
+    pub source: Option<usize>,
     pub range: Option<(usize, usize)>,
     pub kind: Option<String>,
     pub sort: Option<Sort>,
@@ -72,12 +78,15 @@ pub struct Filter {
     pub models: bool,
     pub block_size: usize,
     pub window: usize,
+    /// Only tokens of code: the main JavaScript and files with a code extension such as .glsl.
+    pub code_only: bool,
 }
 
 impl Default for Filter {
     fn default() -> Self {
         Self {
             section: None,
+            source: None,
             range: None,
             kind: None,
             sort: None,
@@ -86,6 +95,7 @@ impl Default for Filter {
             models: false,
             block_size: 64,
             window: 32,
+            code_only: false,
         }
     }
 }
@@ -117,12 +127,41 @@ pub fn run(args: Args) -> Result<()> {
             _ => data
                 .sections
                 .iter()
-                .position(|sec| sec.path == *s || sec.path.ends_with(s.as_str()))
+                .position(|sec| {
+                    [Some(&sec.path), sec.label.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|name| name == s || name.ends_with(s.as_str()))
+                })
                 .with_context(|| format!("No section '{s}'; see the sections view"))?,
         }),
     };
+    let source = match &args.source {
+        None => None,
+        Some(s) => {
+            let mapping = data
+                .source_mapping
+                .as_ref()
+                .context("The report has no source map. Compress with --report-source-map.")?;
+            Some(match s.parse::<usize>() {
+                Ok(i) if i < mapping.sources.len() => i,
+                _ => mapping
+                    .sources
+                    .iter()
+                    .position(|src| src.path == *s || src.path.ends_with(s.as_str()))
+                    .with_context(|| format!("No source '{s}'; see the sources view"))?,
+            })
+        }
+    };
+    if matches!(args.view, View::Sources | View::SourceLines) && data.source_mapping.is_none() {
+        bail!(
+            "The {} view needs a source map. Compress with --report-source-map.",
+            args.view.name()
+        );
+    }
     let filter = Filter {
         section,
+        source,
         range: args.range,
         kind: args.kind,
         sort: args.sort,
@@ -131,6 +170,7 @@ pub fn run(args: Args) -> Result<()> {
         models: args.models,
         block_size: args.block_size.max(1),
         window: args.window.max(1),
+        code_only: false,
     };
 
     let analysis = Analysis::new(&data);

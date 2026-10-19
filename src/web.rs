@@ -13,7 +13,9 @@ use crate::{
         model_finder::{DEFAULT_CONFIG_JSON, SIZE_64K_CONFIG_JSON},
         Encoder,
     },
-    report::{ReportData, ReportOptions, Section, View, REPORT_DIR},
+    report::{
+        is_text, source_map::SourceMapping, ReportData, ReportOptions, Section, View, REPORT_DIR,
+    },
 };
 use output_generator::{render_output, BundledFile, Loader, OutputGenerationOptions};
 
@@ -55,6 +57,16 @@ pub struct Args {
     /// Also write these views of the report as TSV files (implies --report), e.g. lines,tokens
     #[arg(long, value_enum, value_delimiter = ',', value_name = "VIEW")]
     pub report_detail: Vec<View>,
+
+    /// Source map of the main JavaScript, to tell in the report which original source files and
+    /// lines its bytes come from (implies --report)
+    #[arg(long, value_name = "FILE")]
+    pub report_source_map: Option<PathBuf>,
+
+    /// Name of a file in the report, e.g. the module a bundler made it from (implies --report).
+    /// FILE is the path as given with --js-main or --file. Can be given multiple times.
+    #[arg(long, value_name = "FILE=LABEL", value_parser = parse_label)]
+    pub report_label: Vec<(String, String)>,
 
     /// Compression model config JSON (uses the embedded default when omitted)
     #[arg(long)]
@@ -150,8 +162,18 @@ pub enum SizeProfile {
 
 impl Args {
     fn wants_report(&self) -> bool {
-        self.report || self.report_models || !self.report_detail.is_empty()
+        self.report
+            || self.report_models
+            || !self.report_detail.is_empty()
+            || self.report_source_map.is_some()
+            || !self.report_label.is_empty()
     }
+}
+
+fn parse_label(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(file, label)| (file.to_owned(), label.to_owned()))
+        .ok_or_else(|| "expected FILE=LABEL".to_owned())
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -211,6 +233,20 @@ pub fn run(args: Args) -> Result<()> {
         )
     })?;
 
+    // Check the report options first, so that they fail before compressing.
+    for (file, _) in &args.report_label {
+        if *file != args.js_main
+            && !args.files.contains(file)
+            && !args.pre_compressed_files.contains(file)
+        {
+            bail!("--report-label: '{file}' is not given with --js-main, --file or --pre-compressed-file");
+        }
+    }
+    let source_mapping = match &args.report_source_map {
+        Some(path) => Some(SourceMapping::read(path, &main_js_bytes)?),
+        None => None,
+    };
+
     println!(
         "Starting compression (rootsqz v{})",
         env!("CARGO_PKG_VERSION")
@@ -241,6 +277,7 @@ pub fn run(args: Args) -> Result<()> {
 
         sections.push(Section {
             path: file.clone(),
+            label: None,
             kind: "file".to_owned(),
             start: offset as usize,
             length: file_len as usize,
@@ -264,12 +301,12 @@ pub fn run(args: Args) -> Result<()> {
 
     let pre_compressed_files: Result<Vec<output_generator::FileWithContent>> = args
         .pre_compressed_files
-        .into_iter()
+        .iter()
         .map(|path| {
-            let content = std::fs::read(&path)
+            let content = std::fs::read(path)
                 .context(format!("Failed to read pre-compressed file: {}", path))?;
             Ok(output_generator::FileWithContent {
-                path: PathBuf::from(&path),
+                path: PathBuf::from(path),
                 content,
             })
         })
@@ -277,7 +314,7 @@ pub fn run(args: Args) -> Result<()> {
 
     println!("Rendering output...");
 
-    let outputs = render_output(
+    let mut outputs = render_output(
         OutputGenerationOptions {
             output_dir: Path::new(&args.output_directory).to_owned(),
             target: args.target,
@@ -296,8 +333,18 @@ pub fn run(args: Args) -> Result<()> {
     if let Some(recording) = recording {
         println!("Writing compression report...");
         for section in &mut sections {
-            section.text =
-                Section::new("", "", 0, &recording.input[section.start..section.end()]).text;
+            section.text = is_text(&recording.input[section.start..section.end()]);
+        }
+        for (file, label) in &args.report_label {
+            if let Some(section) = sections.iter_mut().find(|s| s.path == *file) {
+                section.label = Some(label.clone());
+            }
+            let part_name = format!("pre-compressed file {file}");
+            for part in outputs.iter_mut().flat_map(|f| &mut f.parts) {
+                if part.name == part_name {
+                    part.name = format!("{part_name} ({label})");
+                }
+            }
         }
         let report_dir = Path::new(&args.output_directory).join(REPORT_DIR);
         ReportData {
@@ -311,6 +358,7 @@ pub fn run(args: Args) -> Result<()> {
             sections,
             outputs,
             recording,
+            source_mapping,
         }
         .write(
             &report_dir,

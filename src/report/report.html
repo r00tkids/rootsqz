@@ -94,6 +94,9 @@ const cost = o => costs16[o] / 256;
 const names = S.models.names, M = names.length;
 const modelCost = (o, j) => modelCosts16[o * M + j] / 256;
 const sections = S.sections;
+const sourcePos = (() => { if (!DATA.sourcePos) return null; const b = b64(DATA.sourcePos); return new Int32Array(b.buffer, b.byteOffset, b.length / 4); })();
+const sourceOf = o => sourcePos && 2 * o < sourcePos.length && sourcePos[2 * o] >= 0 ? `${DATA.sourcePaths[sourcePos[2 * o]]}:${sourcePos[2 * o + 1]}` : null;
+const nameOf = s => s.label || s.path;
 const fmt = (v, d = 1) => Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const $ = id => document.getElementById(id);
@@ -197,7 +200,7 @@ sections.forEach((s, si) => {
   const d = document.createElement("details");
   d.open = true;
   d.id = "sec" + si;
-  d.innerHTML = `<summary>${esc(s.path)}<small>${s.kind} · ${s.text ? "text" : "binary"} · ${s.length.toLocaleString()} bytes · ${fmt(s.cost_bytes)} bytes of cost · ${fmt(s.bits_per_byte, 3)} bits/byte · offset ${s.start}</small></summary>`;
+  d.innerHTML = `<summary>${esc(nameOf(s))}<small>${s.label ? esc(s.path) + " · " : ""}${s.kind} · ${s.text ? "text" : "binary"} · ${s.length.toLocaleString()} bytes · ${fmt(s.cost_bytes)} bytes of cost · ${fmt(s.bits_per_byte, 3)} bits/byte · offset ${s.start}</small></summary>`;
   root.appendChild(d);
   renderSection(si, d);
 });
@@ -220,7 +223,9 @@ function showTip(el, x, y) {
   let c = 0; for (let k = 0; k < el.n; k++) c += cost(o + k);
   const lc = lineCol(si, o);
   const bytes = Array.from(input.subarray(o, o + el.n), b => b.toString(16).padStart(2, "0")).join(" ");
-  let h = `<div><b>${esc(s.path)}</b>${lc ? ` line ${lc[0]}, column ${lc[1]}` : ""}</div>`;
+  let h = `<div><b>${esc(nameOf(s))}</b>${lc ? ` line ${lc[0]}, column ${lc[1]}` : ""}</div>`;
+  const src = sourceOf(o);
+  if (src) h += `<div>from <b>${esc(src)}</b></div>`;
   h += `<div>offset ${o} (section +${o - s.start}) · bytes ${bytes}</div>`;
   h += `<div><b>${fmt(c, 2)}</b> bits · stream position ≈ ${o ? DATA.encodedPos[o - 1] : 0}</div>`;
   if (M) {
@@ -286,7 +291,11 @@ const panels = {
   },
   "Sections": p => {
     p.appendChild(note("The main JavaScript and each --file, in the order they are compressed. The model learns across them."));
-    p.appendChild(table(sections, [txt("#", "index"), code("path", "path"), num("bytes", "length", 0), num("cost", "cost_bytes"), num("bits/byte", "bits_per_byte", 3)], r => goTo(r.start, r.start + 1)));
+    p.appendChild(table(sections, [txt("#", "index"), { label: "file", html: r => `<code>${esc(nameOf(r))}</code>` }, num("bytes", "length", 0), num("cost", "cost_bytes"), num("bits/byte", "bits_per_byte", 3)], r => goTo(r.start, r.start + 1)));
+    if (S.sources.length) {
+      p.appendChild(h2("Original sources of the main JavaScript"));
+      p.appendChild(table(S.sources, [code("source", "path"), num("bytes", "length", 0), num("cost", "cost_bytes"), num("bits/byte", "bits_per_byte", 3), num("share", "share", 3)], r => goTo(r.first_start, r.first_start + 1)));
+    }
     p.appendChild(h2("Cost by token kind"));
     p.appendChild(table(S.token_kinds, [txt("kind", "kind"), num("count", "count", 0), num("bytes", "length", 0), num("bits", "bits"), num("bits/byte", "bits_per_byte", 3)]));
   },
@@ -299,6 +308,10 @@ const panels = {
     if (S.top.blocks.length) {
       p.appendChild(h2("Most expensive blocks"));
       p.appendChild(table(S.top.blocks, [txt("start", "start"), num("bits", "bits"), num("b/B", "bits_per_byte", 2)], go));
+    }
+    if (S.top.source_lines.length) {
+      p.appendChild(h2("Most expensive original source lines"));
+      p.appendChild(table(S.top.source_lines, [{ label: "source", html: r => `<code>${esc(r.path)}:${r.line ?? ""}</code>` }, num("bits", "bits"), code("text", "text")], r => goTo(r.first_start, r.first_start + 1)));
     }
     p.appendChild(h2("Identifiers by total cost"));
     p.appendChild(table(S.top.identifiers, [code("ident", "text"), num("count", "count", 0), num("bits", "bits"), num("each", "bits_per_occurrence")], go));

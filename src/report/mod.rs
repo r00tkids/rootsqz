@@ -4,6 +4,7 @@
 mod analysis;
 mod html;
 pub mod query;
+pub mod source_map;
 mod table;
 
 use std::{
@@ -21,17 +22,22 @@ use crate::{
 };
 
 pub use analysis::View;
+use source_map::{SourceFile, SourceMapping, SourcePos};
 
 /// Directory in the output directory that the report is written to.
 pub const REPORT_DIR: &str = "report";
 const META_FILE: &str = "report.json";
 const DATA_FILE: &str = "data.bin";
+const SOURCES_FILE: &str = "sources.json";
 
 /// One input file in the compressed stream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
     /// Path as given on the command line.
     pub path: String,
+    /// Name given with --report-label, e.g. the module the plugin made the file from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     /// `main` for the main JavaScript, `file` for a `--file`.
     pub kind: String,
     /// Offset of the first byte in the decompressed stream.
@@ -45,6 +51,7 @@ impl Section {
     pub fn new(path: &str, kind: &str, start: usize, content: &[u8]) -> Self {
         Self {
             path: path.to_owned(),
+            label: None,
             kind: kind.to_owned(),
             start,
             length: content.len(),
@@ -55,9 +62,14 @@ impl Section {
     pub fn end(&self) -> usize {
         self.start + self.length
     }
+
+    /// The label if there is one, otherwise the path.
+    pub fn name(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.path)
+    }
 }
 
-fn is_text(content: &[u8]) -> bool {
+pub fn is_text(content: &[u8]) -> bool {
     std::str::from_utf8(content).is_ok()
         && content
             .iter()
@@ -74,6 +86,8 @@ pub struct ReportData {
     /// Names of the submodels, empty if their predictions were not recorded.
     pub model_names: Vec<String>,
     pub recording: Recording,
+    /// Original positions of the main JavaScript, from --report-source-map.
+    pub source_mapping: Option<SourceMapping>,
 }
 
 /// What `--report` writes, besides the summary.
@@ -88,6 +102,13 @@ impl ReportData {
     pub fn write(&self, dir: &Path, options: &ReportOptions) -> Result<()> {
         fs::create_dir_all(dir).context("Failed to create the report directory")?;
         self.write_data(&dir.join(DATA_FILE))?;
+        let sources_path = dir.join(SOURCES_FILE);
+        match &self.source_mapping {
+            Some(mapping) => fs::write(&sources_path, serde_json::to_string(&mapping.sources)?)
+                .context("Failed to write sources.json")?,
+            None if sources_path.exists() => fs::remove_file(&sources_path)?,
+            None => {}
+        }
 
         let analysis = analysis::Analysis::new(self);
         let mut detail_files = Vec::new();
@@ -122,6 +143,15 @@ impl ReportData {
         for v in r.preds.iter().chain(&r.submodel_preds) {
             out.write_all(&v.to_le_bytes())?;
         }
+        if let Some(mapping) = &self.source_mapping {
+            for pos in &mapping.positions {
+                let (source, line, column) =
+                    pos.map_or((-1, 0, 0), |p| (p.source as i32, p.line, p.column));
+                out.write_all(&source.to_le_bytes())?;
+                out.write_all(&line.to_le_bytes())?;
+                out.write_all(&column.to_le_bytes())?;
+            }
+        }
         out.flush()?;
         Ok(())
     }
@@ -152,7 +182,13 @@ impl ReportData {
         let data = fs::read(dir.join(DATA_FILE)).context("Failed to read data.bin")?;
         let n = sections.iter().map(|s| s.length).sum::<usize>();
         let m = model_names.len();
-        let expected = n + 4 * n + 4 * 8 * n + 4 * 8 * n * m;
+        let map_path = summary["source_map"]["file"].as_str().map(str::to_owned);
+        let mapped = if map_path.is_some() {
+            sections[0].length
+        } else {
+            0
+        };
+        let expected = n + 4 * n + 4 * 8 * n + 4 * 8 * n * m + 12 * mapped;
         ensure!(
             data.len() == expected,
             "data.bin has {} bytes, report.json describes {expected}",
@@ -160,7 +196,8 @@ impl ReportData {
         );
         let (input, rest) = data.split_at(n);
         let (encoded_pos, rest) = rest.split_at(4 * n);
-        let (preds, submodel_preds) = rest.split_at(4 * 8 * n);
+        let (preds, rest) = rest.split_at(4 * 8 * n);
+        let (submodel_preds, positions) = rest.split_at(4 * 8 * n * m);
         let u32s = |b: &[u8]| -> Vec<u32> {
             b.chunks_exact(4)
                 .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
@@ -172,7 +209,34 @@ impl ReportData {
                 .collect()
         };
 
+        let source_mapping = match map_path {
+            None => None,
+            Some(map_path) => {
+                let sources: Vec<SourceFile> = serde_json::from_slice(
+                    &fs::read(dir.join(SOURCES_FILE)).context("Failed to read sources.json")?,
+                )
+                .context("Failed to parse sources.json")?;
+                let positions = positions
+                    .chunks_exact(12)
+                    .map(|c| {
+                        let source = i32::from_le_bytes(c[0..4].try_into().unwrap());
+                        (source >= 0).then(|| SourcePos {
+                            source: source as u32,
+                            line: u32::from_le_bytes(c[4..8].try_into().unwrap()),
+                            column: u32::from_le_bytes(c[8..12].try_into().unwrap()),
+                        })
+                    })
+                    .collect();
+                Some(SourceMapping {
+                    map_path,
+                    sources,
+                    positions,
+                })
+            }
+        };
+
         Ok(Self {
+            source_mapping,
             config,
             config_json,
             sections,
@@ -211,6 +275,24 @@ mod tests {
     use crate::compressor::compress_config::CompressConfig;
     use crate::compressor::{model_finder::DEFAULT_CONFIG_JSON, Encoder};
 
+    /// A source map that maps every line of `js` to the same line of `orig.js`.
+    fn line_source_map(js: &[u8]) -> super::SourceMapping {
+        let lines = js.split(|&b| b == b'\n').count();
+        let mappings = std::iter::once("AAAA")
+            .chain(std::iter::repeat("AACA").take(lines - 1))
+            .collect::<Vec<_>>()
+            .join(";");
+        let dir = Path::new("testout/report_source_map");
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join("index.js.map");
+        std::fs::write(
+            &path,
+            format!(r#"{{"version":3,"sources":["orig.js"],"mappings":"{mappings}"}}"#),
+        )
+        .unwrap();
+        super::SourceMapping::read(&path, js).unwrap()
+    }
+
     fn encode(config: &CompressConfig, sections: &[&[u8]], record: bool) -> (Vec<u8>, ReportData) {
         let mut encoded = Vec::new();
         let mut encoder = Encoder::new(config.create_model().unwrap(), &mut encoded).unwrap();
@@ -242,6 +324,7 @@ mod tests {
             sections: report_sections,
             outputs: Vec::new(),
             recording,
+            source_mapping: None,
         };
         (encoded, data)
     }
@@ -256,7 +339,9 @@ mod tests {
         let sections: [&[u8]; 2] = [&js, &binary];
 
         let (plain, _) = encode(&config, &sections, false);
-        let (encoded, data) = encode(&config, &sections, true);
+        let (encoded, mut data) = encode(&config, &sections, true);
+        data.source_mapping = Some(line_source_map(&js));
+        data.sections[1].label = Some("random.bin".to_owned());
         assert_eq!(plain, encoded, "recording must not change the output");
 
         assert_eq!(data.recording.input.len(), js.len() + binary.len());
@@ -295,6 +380,11 @@ mod tests {
         assert_eq!(read.recording.preds, data.recording.preds);
         assert_eq!(read.recording.submodel_preds, data.recording.submodel_preds);
         assert_eq!(read.model_names, data.model_names);
+        assert_eq!(read.sections[1].label.as_deref(), Some("random.bin"));
+        assert_eq!(
+            read.source_mapping.as_ref().unwrap().positions,
+            data.source_mapping.as_ref().unwrap().positions
+        );
 
         let analysis = super::analysis::Analysis::new(&read);
         let filter = Filter {
@@ -328,5 +418,9 @@ mod tests {
             (line_bits - section_bits).abs() < 1e-6,
             "lines must cover the text section"
         );
+
+        // Every line maps to the same line of orig.js, so source lines and lines agree.
+        let source_lines = analysis.view(View::SourceLines, &Filter::default());
+        assert_eq!(source_lines.rows.len(), lines.rows.len());
     }
 }

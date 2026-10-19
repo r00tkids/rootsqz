@@ -40,7 +40,24 @@ fn base64(bytes: &[u8]) -> String {
 
 pub fn write(analysis: &Analysis, summary: &Value, path: &Path) -> Result<()> {
     let data = analysis.data();
+    let (source_paths, source_pos) = match &data.source_mapping {
+        Some(m) => {
+            let mut bytes = Vec::with_capacity(m.positions.len() * 8);
+            for pos in &m.positions {
+                let (source, line) = pos.map_or((-1, 0), |p| (p.source as i32, p.line));
+                bytes.extend_from_slice(&source.to_le_bytes());
+                bytes.extend_from_slice(&line.to_le_bytes());
+            }
+            (
+                m.sources.iter().map(|s| s.path.clone()).collect::<Vec<_>>(),
+                base64(&bytes),
+            )
+        }
+        None => (Vec::new(), String::new()),
+    };
     let payload = json!({
+        "sourcePaths": source_paths,
+        "sourcePos": source_pos,
         "summary": summary,
         "input": base64(&data.recording.input),
         "costs": encode_costs(analysis.byte_costs()),
