@@ -3,7 +3,7 @@ import querystring from "node:querystring";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createFilter, FilterPattern } from "@rollup/pluginutils";
-import { compress, RUNTIME_GLOBAL, type LoaderOptions } from "@r00tkids/rootsqz";
+import { compress, RUNTIME_GLOBAL, type LoaderOptions, type ReportView } from "@r00tkids/rootsqz";
 
 export type { LoaderOptions };
 
@@ -94,9 +94,21 @@ export type RootsqzOptions = {
   config?: string;
 
   /**
-   * Write a detailed compression report next to the output (`--report`).
+   * Write a compression report to `rootsqz-output/report/` (`--report`):
+   * `report.json` (a summary for analysis, also by an LLM), `report.html` and `data.bin`,
+   * which `rootsqz report <dir>` queries.
    */
   report?: boolean;
+
+  /**
+   * Also record what every submodel predicted (`--report-models`). Implies `report`.
+   */
+  reportModels?: boolean;
+
+  /**
+   * Also write these views of the report as TSV files (`--report-detail`). Implies `report`.
+   */
+  reportDetail?: ReportView[];
 
   /**
    * Loader shown while the output decompresses: a built-in `preset` ("spinner", "bar" or "progress"),
@@ -150,10 +162,10 @@ export type RootsqzOptions = {
  *
  * @param options Options of the plugin.
  * @returns The plugin, for the `plugins` array of the Rollup or Vite config.
- * @throws If `brotli` is combined with `config`, `report` or the `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option or the `64k` size profile.
  */
 export default function (options: RootsqzOptions = {}): Plugin {
-  if (options.brotli && (options.config || options.report || options.sizeProfile === "64k")) {
+  if (options.brotli && (options.config || options.report || options.reportModels || options.reportDetail?.length || options.sizeProfile === "64k")) {
     throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
   }
 
@@ -360,6 +372,8 @@ export default function (options: RootsqzOptions = {}): Plugin {
           config: options.config,
           report: options.report,
           loader: options.loader,
+          reportModels: options.reportModels,
+          reportDetail: options.reportDetail,
           extraArgs: options.rootsqzArgs,
         });
 

@@ -11,6 +11,7 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 - `rootsqz report <dir>` prints views of a report as tab separated rows: per section, line, block, hotspot, token, byte or bit, with filters by section, byte range, token kind and cost.
 - `--report-models` records what every submodel predicted, to compare the models of a config.
 - `--report-detail <VIEW,...>` writes views of the report as TSV files at compress time.
+- The Node API and the plugin have the options `reportModels` and `reportDetail`. The Node API exports the type `ReportView`.
 
 ### Changed
 - **Breaking:** `--report` writes to `report/` in the output directory instead of `report.html` next to the output. `report.html` shows the cost of every byte in bits, keeps line breaks, covers the `--file` files, and has the summary, the suggestions and details per byte.

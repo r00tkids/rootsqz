@@ -83,9 +83,21 @@ rootsqz({
     config: undefined,
 
     /**
-     * Write a detailed compression report next to the output.
+     * Write a compression report to rootsqz-output/report/: report.json, a summary
+     * for analysis (also by an LLM), report.html, and data.bin for `rootsqz report`.
      */
     report: false,
+
+    /**
+     * Also record what every submodel predicted. Implies `report`.
+     */
+    reportModels: false,
+
+    /**
+     * Also write these views of the report as TSV files, e.g. ["lines", "tokens"].
+     * Implies `report`.
+     */
+    reportDetail: [],
 
     /**
      * Loader shown while the output decompresses: a built-in `preset` ("spinner", "bar" or "progress"),

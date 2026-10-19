@@ -188,6 +188,10 @@ pub fn run(args: Args) -> Result<()> {
         );
     }
 
+    if args.report_detail.contains(&View::Summary) {
+        bail!("--report-detail summary: the summary is report.json, which --report always writes");
+    }
+
     let config_json = match &args.config {
         Some(path) => std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config: {}", path.display()))?,

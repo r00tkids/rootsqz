@@ -116,6 +116,22 @@ export function run(args: string[], options: RunOptions = {}): Promise<void> {
 }
 
 /**
+ * A view of the compression report, for `reportDetail` and `rootsqz report --view`.
+ */
+export type ReportView =
+  | "sections"
+  | "lines"
+  | "blocks"
+  | "hotspots"
+  | "tokens"
+  | "token-totals"
+  | "bytes"
+  | "bits"
+  | "repeats"
+  | "models"
+  | "suggestions";
+
+/**
  * Loader shown while the web output decompresses.
  * Either `preset`, or your own `html` and `js`; the executable rejects `preset` combined with `html` or `js`.
  */
@@ -194,9 +210,21 @@ export type CompressOptions = RunOptions & {
   config?: string;
 
   /**
-   * Write a detailed compression report to the output directory (`--report`).
+   * Write a compression report to `report/` in the output directory (`--report`):
+   * `report.json` (a summary for analysis, also by an LLM), `report.html` and `data.bin`,
+   * which `rootsqz report <dir>` queries.
    */
   report?: boolean;
+
+  /**
+   * Also record what every submodel predicted (`--report-models`). Implies `report`.
+   */
+  reportModels?: boolean;
+
+  /**
+   * Also write these views of the report as TSV files (`--report-detail`). Implies `report`.
+   */
+  reportDetail?: ReportView[];
 
   /**
    * Loader shown while the web output decompresses (`--loader`, `--loader-html`, `--loader-js`, `--loader-keep`).
@@ -209,13 +237,17 @@ export type CompressOptions = RunOptions & {
   extraArgs?: string[];
 };
 
+function wantsReport(options: CompressOptions): boolean {
+  return Boolean(options.report || options.reportModels || options.reportDetail?.length);
+}
+
 /**
  * Command line arguments of the executable for the given options.
  *
- * @throws If `brotli` is combined with `config`, `report` or the `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option or the `64k` size profile.
  */
 export function compressArgs(options: CompressOptions): string[] {
-  if (options.brotli && (options.config || options.report || options.sizeProfile === "64k")) {
+  if (options.brotli && (options.config || wantsReport(options) || options.sizeProfile === "64k")) {
     throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
   }
 
@@ -257,6 +289,12 @@ export function compressArgs(options: CompressOptions): string[] {
   if (options.loader?.keep) {
     args.push("--loader-keep");
   }
+  if (options.reportModels) {
+    args.push("--report-models");
+  }
+  if (options.reportDetail?.length) {
+    args.push("--report-detail", options.reportDetail.join(","));
+  }
   args.push(...(options.extraArgs ?? []));
 
   return args;
@@ -266,7 +304,7 @@ export function compressArgs(options: CompressOptions): string[] {
  * Packs and compresses a JavaScript file and further files into the output directory.
  * Rejects if the executable cannot be started or exits with a code other than 0.
  *
- * @throws If `brotli` is combined with `config`, `report` or the `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option or the `64k` size profile.
  */
 export function compress(options: CompressOptions): Promise<void> {
   return run(compressArgs(options), options);

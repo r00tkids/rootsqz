@@ -17,6 +17,8 @@ npx rootsqz --js-main index.js --file shader.glsl --output-directory out
 
 See `npx rootsqz --help` and the [rootsqz README](https://github.com/r00tkids/rootsqz#usage) for the options.
 
+With `--report`, rootsqz writes a [compression report](https://github.com/r00tkids/rootsqz#compression-report) to `out/report`, and `npx rootsqz report out --view hotspots --top 20` prints views of it.
+
 ## Node API
 ```js
 import { compress } from '@r00tkids/rootsqz';
@@ -46,6 +48,11 @@ await compress({
      * "4k" (default) or "64k"
      */
     sizeProfile: '64k',
+
+    /**
+     * Write a compression report to out/report. reportModels and reportDetail add detail.
+     */
+    report: true,
 
     /**
      * Loader shown while the web output decompresses: `preset` "spinner", "bar" or "progress",
