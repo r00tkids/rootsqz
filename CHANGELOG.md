@@ -6,6 +6,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Added
+- A loader for the web output, shown while it decompresses: `--loader spinner` or `--loader bar`, or your own `--loader-html <file>` and `--loader-js <file>`. The script gets the progress through `rsqz.progress = (done, total) => ...`. `--loader-keep` keeps the loader when the main JavaScript runs, so the demo can continue the progress bar. Outputs without a loader don't change.
+
 ### Changed
 - The generated output starts about 0.6 seconds sooner: setting up the decompression model took about 650 ms and now takes about 50 ms. The output grows by 1 byte.
 

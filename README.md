@@ -55,6 +55,7 @@ Options:
 - `--size-profile <4k|64k>`: Embedded compression preset (default: `4k`). The `64k` preset adds a bounded match predictor for larger JavaScript inputs.
 - `--brotli`: Use native Brotli decoding for web inputs (Firefox 147+ / Safari 18.4+).
 - `--config <file.json>`: Use a complete JSON `CompressConfig` instead of the embedded preset. This takes precedence over `--size-profile`.
+- `--loader <spinner|bar>`, `--loader-html <file>`, `--loader-js <file>`, `--loader-keep`: Show a loader while the web output decompresses, see [Loader](#loader).
 - See `rootsqz --help` for more CLI options
 
 Both presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json) or [the 64k preset](src/compressor/size_64k_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, and `{"type":"IndirectByte","context_bytes":2,"max_count":15}`. The decoder is generated from the selected config.
@@ -64,6 +65,25 @@ To access the contents of files specified with `--file` or `--pre-compressed-fil
 `rsqz.files["<FILENAME>"]` returns an `Uint8Array`, to read it as text use `new TextDecoder().decode(rsqz.files["example.glsl"])`.
 
 Note: `<FILENAME>` refers to the base name of the file, not its full or relative path.
+
+## Loader
+The web output can show a loader while it decompresses. Without loader options, the output is the same as before, not a byte larger.
+
+- `--loader spinner`: A spinning ring. The decoder runs in one go.
+- `--loader bar`: A progress bar. The decoder runs in slices.
+- `--loader-html <file>`: Your own markup and CSS, e.g. `<style>…</style><div id=l></div>`. It is packed as it is, without minification, so keep it compact. Scripts in it do not run.
+- `--loader-js <file>`: Your own script. It runs after the markup is inserted, so it can use it. Set `rsqz.progress` in it:
+  ```js
+  rsqz.progress = (done, total) => {
+      document.querySelector("#l").style.width = done / total * 100 + "%";
+  };
+  ```
+  It is called with `0` before decoding, then with the number of decoded bytes after each slice of about 12 ms, and with `total` at the end.
+- `--loader-keep`: Keep the loader when the main JavaScript runs. By default the page is cleared first. With it, the demo can continue a progress bar during its own precalculation by calling `rsqz.progress` itself, and removes the loader when done.
+
+`--loader` cannot be combined with `--loader-html` or `--loader-js`; to change a preset, copy it from [src/web/templates/web/loaders](src/web/templates/web/loaders). Loaders are only for the `web` target without `--brotli`.
+
+How it works: the decoder blocks the main thread, and the browser paints nothing while it runs. With only `--loader-html`, the decoder runs in one go after the loader is painted once, so only CSS `transform` and `opacity` animations, which browsers run off the main thread, keep moving; a spinner works, a progress bar does not. With `--loader-js`, the decoder yields to the browser between slices, so the page repaints. This makes decoding slightly slower.
 
 ## Vite / Rollup plugin
 [`@r00tkids/rollup-plugin-rootsqz`](packages/rollup-plugin-rootsqz) runs rootsqz on the bundle, so a Vite or Rollup project builds straight to one compressed HTML file.

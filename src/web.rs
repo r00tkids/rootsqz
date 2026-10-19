@@ -15,7 +15,7 @@ use crate::{
     },
     report::ReportGenerator,
 };
-use output_generator::{render_output, BundledFile, OutputGenerationOptions};
+use output_generator::{render_output, BundledFile, Loader, OutputGenerationOptions};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -56,6 +56,71 @@ pub struct Args {
     /// Pack a web input as a Brotli stream (Firefox 147+ / Safari 18.4+)
     #[arg(long)]
     pub brotli: bool,
+
+    /// Built-in loader shown while the web output decompresses
+    #[arg(long, value_enum, value_name = "PRESET", conflicts_with_all = ["loader_html", "loader_js"])]
+    pub loader: Option<LoaderPreset>,
+
+    /// HTML (with CSS) shown while the web output decompresses. Packed as it is, without minification
+    #[arg(long, value_name = "FILE")]
+    pub loader_html: Option<PathBuf>,
+
+    /// JavaScript run before the web output decompresses. It sets `rsqz.progress = (done, total) => ...`,
+    /// which is called with the number of decoded bytes while decoding runs in slices
+    #[arg(long, value_name = "FILE")]
+    pub loader_js: Option<PathBuf>,
+
+    /// Keep the loader when the main JavaScript runs, instead of clearing the page.
+    /// `rsqz.progress` stays, so the demo can continue the progress display
+    #[arg(long)]
+    pub loader_keep: bool,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoaderPreset {
+    /// Spinning ring, with the decoder running in one go
+    Spinner,
+    /// Progress bar, with the decoder running in slices
+    Bar,
+}
+
+impl Args {
+    /// The loader given by the options, or `None` without loader options.
+    fn loader(&self) -> Result<Option<Loader>> {
+        let read = |path: &Option<PathBuf>| -> Result<Option<String>> {
+            path.as_ref()
+                .map(|path| {
+                    std::fs::read_to_string(path)
+                        .with_context(|| format!("Failed to read loader file: {}", path.display()))
+                })
+                .transpose()
+        };
+        let (html, js) = match self.loader {
+            Some(LoaderPreset::Spinner) => (
+                Some(include_str!("web/templates/web/loaders/spinner.html").to_owned()),
+                None,
+            ),
+            Some(LoaderPreset::Bar) => (
+                Some(include_str!("web/templates/web/loaders/bar.html").to_owned()),
+                Some(include_str!("web/templates/web/loaders/bar.js").to_owned()),
+            ),
+            None => (read(&self.loader_html)?, read(&self.loader_js)?),
+        };
+        if html.is_none() && js.is_none() {
+            if self.loader_keep {
+                bail!("--loader-keep requires --loader, --loader-html or --loader-js");
+            }
+            return Ok(None);
+        }
+        if self.target != output_generator::Target::Web || self.brotli {
+            bail!("Loaders are only supported for the web target without --brotli");
+        }
+        Ok(Some(Loader {
+            html,
+            js,
+            keep: self.loader_keep,
+        }))
+    }
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +132,7 @@ pub enum SizeProfile {
 }
 
 pub fn run(args: Args) -> Result<()> {
+    let loader = args.loader()?;
     let main_js_bytes = std::fs::read(&args.js_main)
         .with_context(|| format!("Failed to read JS main file: {}", args.js_main))?;
     if args.brotli {
@@ -171,6 +237,7 @@ pub fn run(args: Args) -> Result<()> {
             target: args.target,
             model_config: model_config.model.clone(),
             static_model_params: model_config.static_model_params.clone(),
+            loader,
         },
         size_before_compression,
         encoded_data,

@@ -19,6 +19,19 @@ pub struct OutputGenerationOptions {
     pub target: Target,
     pub model_config: ModelConfig,
     pub static_model_params: StaticModelParams,
+    /// Loader shown while the web output decompresses
+    pub loader: Option<Loader>,
+}
+
+/// Loader shown while the web output decompresses
+#[derive(Debug, Clone)]
+pub struct Loader {
+    /// Markup inserted into the page before decoding
+    pub html: Option<String>,
+    /// Script run before decoding. Decoding runs in slices and reports progress to `rsqz.progress` when set
+    pub js: Option<String>,
+    /// Keep the loader when the main JavaScript runs, instead of clearing the page
+    pub keep: bool,
 }
 
 bitflags! {
@@ -327,13 +340,18 @@ pub fn render_output(
         target,
         model_config,
         static_model_params,
+        loader,
     } = output_options;
 
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
     let mut features_used = ModelRef::None;
-    let decompression_code =
+    let mut decompression_code =
         generate_js_decompression_code(&model_config, &static_model_params, &mut features_used);
+    let sliced = loader.as_ref().is_some_and(|loader| loader.js.is_some());
+    if sliced {
+        decompression_code += include_str!("js_source/coder_sliced.js");
+    }
 
     Ok(match target {
         Target::Web => {
@@ -345,7 +363,7 @@ pub fn render_output(
             encode_compressed_data(&mut compressed_data, &encoded_data)
                 .context("Failed to encode compressed data")?;
 
-            let mut files_map = "files:{".to_owned();
+            let mut files_map = "{".to_owned();
             let mut offset = 0;
             let mut is_first = true;
             for file in &extra_files {
@@ -401,12 +419,19 @@ pub fn render_output(
                         "decoded_len": size_before_compression,
                         "files_map": files_map,
                         "js_main_len": js_main_len,
+                        "loader": loader.is_some(),
+                        "loader_html": serde_json::to_string(
+                            loader.as_ref().and_then(|loader| loader.html.as_deref()).unwrap_or("")
+                        )?,
+                        "loader_js": loader.as_ref().and_then(|loader| loader.js.as_deref()),
+                        "keep": loader.as_ref().is_some_and(|loader| loader.keep),
                     }),
                 )
                 .context("Failed to render decompression code template")?;
 
-            let decompressor_code_ugly =
-                uglify_src(&decompressor_code).expect("Failed to uglify decompression code");
+            // The loader JavaScript is part of the boot code, so a syntax error in it fails here
+            let decompressor_code_ugly = uglify_src(&decompressor_code)
+                .context("Failed to minify the boot code, including the loader JavaScript")?;
 
             info!(
                 "Decompression code size before deflate: {}",
