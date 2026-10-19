@@ -25,4 +25,5 @@ CI (`.github/workflows/build.yml`) also runs `node scripts/set-version.mjs --che
   - Public interfaces of the npm packages have JSDoc comments.
   - The top-level README and `packages/rollup-plugin-rootsqz/README.md` have the same plugin section, so update both.
   - Changes to the command line options also go in `packages/rootsqz` (`compressArgs`) and the READMEs.
+- **Agent skill:** [skills/rootsqz-report/SKILL.md](skills/rootsqz-report/SKILL.md) tells the coding agents of rootsqz users how to make and read the compression report; `rootsqz install-skill` installs it, and `src/report/guide.rs` writes the `AGENTS.md` of each report. Keep them up to date with changes to the report, its options and `rootsqz report`.
 - **Commits:** one logical change per commit, with a message that says what changed and why.

@@ -368,7 +368,7 @@ pub fn run(args: Args) -> Result<()> {
         )
         .context("Failed to write the compression report")?;
         println!(
-            "Report written to '{}': report.json (summary), report.html; query it with 'rootsqz report {}'",
+            "Report written to '{}': report.json (summary), report.html, AGENTS.md (a guide for coding agents); query it with 'rootsqz report {}'",
             report_dir.display(),
             report_dir.display()
         );

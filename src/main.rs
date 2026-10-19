@@ -5,6 +5,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 
 mod compressor;
 mod report;
+mod skill;
 mod web;
 
 #[derive(Parser, Debug)]
@@ -23,6 +24,9 @@ enum Commands {
     Web(web::Args),
     /// Print a view of a compression report written with --report
     Report(report::query::Args),
+    /// Install the agent skill about the compression report into a project, for coding agents
+    /// such as Claude Code (.claude/skills and .agents/skills)
+    InstallSkill(skill::Args),
 }
 
 fn main() -> Result<()> {
@@ -51,6 +55,7 @@ fn main() -> Result<()> {
     match command {
         Commands::Web(web_args) => web::run(web_args),
         Commands::Report(report_args) => report::query::run(report_args),
+        Commands::InstallSkill(skill_args) => skill::run(skill_args),
     }
 }
 

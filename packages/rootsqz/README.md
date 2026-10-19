@@ -17,7 +17,7 @@ npx rootsqz --js-main index.js --file shader.glsl --output-directory out
 
 See `npx rootsqz --help` and the [rootsqz README](https://github.com/r00tkids/rootsqz#usage) for the options.
 
-With `--report`, rootsqz writes a [compression report](https://github.com/r00tkids/rootsqz#compression-report) to `out/report`, and `npx rootsqz report out --view hotspots --top 20` prints views of it.
+With `--report`, rootsqz writes a [compression report](https://github.com/r00tkids/rootsqz#compression-report) to `out/report`, and `npx rootsqz report out --view hotspots --top 20` prints views of it. `npx rootsqz install-skill` installs an agent skill into your project, so that coding agents such as Claude Code can make and read the report themselves.
 
 ## Node API
 ```js

@@ -63,7 +63,7 @@ impl View {
         }
     }
 
-    fn description(self) -> &'static str {
+    pub fn description(self) -> &'static str {
         match self {
             View::Summary => "this summary",
             View::Sections => "one row per input file (section) of the compressed stream",
@@ -1340,7 +1340,6 @@ fn config_has(config: &ModelConfig, f: impl Fn(&ModelConfig) -> bool + Copy) -> 
             _ => false,
         }
 }
-
 
 fn times(count: f64) -> String {
     if count == 1. {

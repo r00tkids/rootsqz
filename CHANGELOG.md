@@ -8,6 +8,7 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ### Added
 - `--report` writes a compression report for analysis, also by an LLM: `report.json` with totals, the layout of the output, the cost of every input file, hotspots, expensive identifiers, numbers and repeated strings, and suggestions. It covers the files given with `--file` as well.
+- `rootsqz install-skill [DIR]` installs the agent skill `rootsqz-report` into a project (`.claude/skills` and `.agents/skills`). It teaches coding agents to make a compression report, read it, and check that a change saves bytes. Each report directory also gets an `AGENTS.md` (and a `CLAUDE.md` that imports it) about that report.
 - `rootsqz report <dir>` prints views of a report as tab separated rows: per section, line, block, hotspot, token, byte or bit, with filters by section, byte range, token kind and cost.
 - `--report-models` records what every submodel predicted, to compare the models of a config.
 - `--report-detail <VIEW,...>` writes views of the report as TSV files at compress time.

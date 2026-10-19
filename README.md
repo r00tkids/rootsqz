@@ -71,6 +71,7 @@ Both presets are available for `web` and `node` targets. To customize a model, c
 - `report.json`: a summary for analysis by people, scripts or an LLM. It has the totals, the layout of the output file, the cost of every input file, the cost by token kind, the most expensive places (hotspots, identifiers, numbers, repeated strings), suggestions with what to look at next, and the model config. Its `about` entry explains how to read it.
 - `report.html`: the input colored by the cost of each byte. Hover over a byte for details, click a suggestion to show it. Collapse files, dim cheap bytes, search with `/`, and jump with the strip on the right. With a source map, the Sources view shows the original files colored by cost.
 - `data.bin`: what the model predicted for every bit, read by `rootsqz report`.
+- `AGENTS.md`: a guide to this report for coding agents.
 
 The cost of a byte is the number of bits the compressor spends on it, so the costs add up to the size of the compressed stream. A byte costs less when similar bytes came before it, also in earlier files.
 
@@ -87,6 +88,15 @@ The views are `summary`, `sections`, `lines`, `blocks`, `hotspots`, `tokens`, `t
 With `--report-source-map`, the report tells which original source files and lines the bytes of a bundled main JavaScript come from (`--view sources`, `--view source-lines`, `--source`). The [plugin](#vite--rollup-plugin) passes the source map and the module names of the imported files by itself.
 
 With `--report-models`, the report also tells what each submodel of the mixer alone would have cost, for every byte and in total (`--view models`, `--models`). This helps to tune a `--config`. It needs 32 bytes of memory and disk per input byte and submodel.
+
+### For coding agents
+Coding agents such as Claude Code or Codex can make and read the report themselves. Install the agent skill into your project:
+```sh
+npx rootsqz install-skill    # writes .claude/skills/rootsqz-report/SKILL.md and .agents/skills/rootsqz-report/SKILL.md
+```
+When you ask the agent to make the intro smaller, it learns from the skill how to turn on the report, read `report.json`, query it with `rootsqz report`, and check that a change saves bytes. Commit the skill with your project, and install it again after updating rootsqz. The skill is [skills/rootsqz-report/SKILL.md](skills/rootsqz-report/SKILL.md).
+
+Each report directory also has an `AGENTS.md` (and a `CLAUDE.md` that imports it) with what is in that report and how to query it, for agents that open it.
 
 ## Runtime API
 To access the contents of files specified with `--file` or `--pre-compressed-file`, use `rsqz.files["<FILENAME>"]`.
@@ -163,7 +173,7 @@ Notes:
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
 - To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader).
-- With `report: true`, the plugin writes a [compression report](#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set.
+- With `report: true`, the plugin writes a [compression report](#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set. Run `npx rootsqz install-skill` once to teach coding agents to use it ([For coding agents](#for-coding-agents)).
 
 See the [plugin README](packages/rollup-plugin-rootsqz) for all options and [examples/vite](examples/vite) for a working project with `vite-plugin-glsl`.
 

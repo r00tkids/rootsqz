@@ -2,6 +2,7 @@
 //! saved next to the output so that it can be summarized, queried and viewed later.
 
 mod analysis;
+mod guide;
 mod html;
 pub mod query;
 pub mod source_map;
@@ -98,7 +99,7 @@ pub struct ReportOptions {
 }
 
 impl ReportData {
-    /// Writes `report.json`, `data.bin`, `report.html` and the detail files into `dir`.
+    /// Writes `report.json`, `data.bin`, `report.html`, `AGENTS.md` and the detail files into `dir`.
     pub fn write(&self, dir: &Path, options: &ReportOptions) -> Result<()> {
         fs::create_dir_all(dir).context("Failed to create the report directory")?;
         self.write_data(&dir.join(DATA_FILE))?;
@@ -130,6 +131,10 @@ impl ReportData {
 
         html::write(&analysis, &summary, &dir.join("report.html"))
             .context("Failed to write report.html")?;
+        fs::write(dir.join("AGENTS.md"), guide::agents_md(&summary))
+            .context("Failed to write AGENTS.md")?;
+        // Claude Code reads CLAUDE.md, which imports AGENTS.md.
+        fs::write(dir.join("CLAUDE.md"), "@AGENTS.md\n").context("Failed to write CLAUDE.md")?;
         Ok(())
     }
 
@@ -371,9 +376,14 @@ mod tests {
             "data.bin",
             "lines.tsv",
             "blocks.tsv",
+            "AGENTS.md",
+            "CLAUDE.md",
         ] {
             assert!(dir.join(file).is_file(), "{file} missing");
         }
+        let guide = std::fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+        assert!(guide.contains("`--section <SECTION>`"));
+        assert!(guide.contains("`lines.tsv`: the view `lines`"));
 
         let read = ReportData::read(dir.parent().unwrap().join("report").as_path()).unwrap();
         assert_eq!(read.recording.input, data.recording.input);
