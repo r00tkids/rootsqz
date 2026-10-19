@@ -9,12 +9,12 @@
   --bar-h: 42px; --mag-l: 38%;
   --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc; --panel: #f2f1ed;
   --accent: #2a62c9; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --k-hotspot: #c2410c; --k-identifier: #2a62c9; --k-number: #7c3aed; --k-repeat: #0f766e;
+  --k-hotspot: #c2410c; --k-number: #7c3aed; --k-repeat: #0f766e;
   --k-source: #15803d; --k-model: #a21caf; --k-pre-compress: #b45309;
   --sel: rgba(42, 98, 201, .45); --hover: rgba(0, 0, 0, .28); --find: #fde047; --find-cur: #fb923c;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --k-hotspot: #fb923c; --k-identifier: #7aa7ff; --k-number: #b794f6; --k-repeat: #2dd4bf;
+  :root { --k-hotspot: #fb923c; --k-number: #b794f6; --k-repeat: #2dd4bf;
     --k-source: #4ade80; --k-model: #e879f9; --k-pre-compress: #fbbf24; --mag-l: 60%;
     --bg: #161615; --fg: #e8e7e3; --muted: #9a9993; --line: #33322f; --panel: #1f1f1d; --accent: #7aa7ff;
     --sel: rgba(122, 167, 255, .45); --hover: rgba(255, 255, 255, .3); }
@@ -972,7 +972,6 @@ const panels = {
       d.innerHTML = `<div class="k" style="color: var(--k-${esc(s.kind)}, var(--accent))">${esc(s.kind)}${mag}</div><div>${esc(s.message)}</div><div class="q">rootsqz report &lt;dir&gt; ${esc(s.query)}</div>`;
       d.onclick = () => {
         if (s.kind === "source") { const i = sources.findIndex(x => s.message.includes(x.path)); if (i >= 0) { openSource(i); return; } }
-        if (s.kind === "identifier") { const m = s.message.match(/`([^`]+)`/); if (m) { findText(m[1]); return; } }
         if (s.start != null) goTo(s.start, s.end);
       };
       p.appendChild(d);
@@ -988,8 +987,6 @@ const panels = {
       p.appendChild(h2("Most expensive original source lines"));
       p.appendChild(table(S.top.source_lines, [{ label: "source", html: r => `<code>${esc(r.path)}:${r.line ?? ""}</code>` }, num("bits", "bits"), code("text", "text")], r => { if (r.source != null && r.line != null) openSource(r.source, r.line); else goTo(r.first_start); }));
     }
-    p.appendChild(h2("Most expensive lines"));
-    p.appendChild(table(S.top.lines, [txt("line", "line"), num("bits", "bits"), num("b/B", "bits_per_byte", 2), code("text", "text")], go));
     if (S.top.blocks.length) {
       p.appendChild(h2("Most expensive blocks"));
       p.appendChild(table(S.top.blocks, [txt("start", "start"), num("bits", "bits"), num("b/B", "bits_per_byte", 2)], go));

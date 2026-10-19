@@ -1104,33 +1104,6 @@ impl<'a> Analysis<'a> {
             );
         }
 
-        // Identifiers that cost much in total.
-        let idents = self.top(View::TokenTotals, 60, Some("ident"));
-        let mut added = 0;
-        for row in &idents.rows {
-            let (name, count, bits, per) = (
-                text(get(row, &idents, "text")),
-                num(get(row, &idents, "count")),
-                num(get(row, &idents, "bits")),
-                num(get(row, &idents, "bits_per_occurrence")),
-            );
-            if bits < 32. || name.len() < 3 || KEYWORDS.contains(&name.as_str()) || added >= 8 {
-                continue;
-            }
-            added += 1;
-            add(
-                "identifier",
-                bits,
-                None,
-                format!(
-                    "Identifier `{name}` occurs {} and costs {:.1} bytes in total ({per:.1} bits each). If it is a name you chose: a shorter one, one that is already common in the code, or fewer uses may save bytes.",
-                    times(count),
-                    bits / 8.
-                ),
-                format!("--view tokens --kind ident --top 50"),
-            );
-        }
-
         // Number literals with many digits.
         let numbers = self.top(View::TokenTotals, 50, Some("number"));
         let mut added = 0;
@@ -1328,7 +1301,6 @@ impl<'a> Analysis<'a> {
             "suggestions": self.view(View::Suggestions, &Filter { top: Some(25), ..Filter::default() }).to_json(),
             "top": {
                 "hotspots": self.top(View::Hotspots, 15, None).to_json(),
-                "lines": self.top(View::Lines, 10, None).to_json(),
                 "blocks": self.top(View::Blocks, 10, None).to_json(),
                 "identifiers": self.top(View::TokenTotals, 15, Some("ident")).to_json(),
                 "numbers": self.top(View::TokenTotals, 10, Some("number")).to_json(),
@@ -1369,128 +1341,6 @@ fn config_has(config: &ModelConfig, f: impl Fn(&ModelConfig) -> bool + Copy) -> 
         }
 }
 
-/// Keywords and built-in names of JavaScript and GLSL, which cannot be renamed.
-const KEYWORDS: &[&str] = &[
-    "await",
-    "break",
-    "case",
-    "catch",
-    "class",
-    "const",
-    "continue",
-    "debugger",
-    "default",
-    "delete",
-    "do",
-    "else",
-    "export",
-    "extends",
-    "false",
-    "finally",
-    "for",
-    "function",
-    "if",
-    "import",
-    "in",
-    "instanceof",
-    "let",
-    "new",
-    "null",
-    "return",
-    "super",
-    "switch",
-    "this",
-    "throw",
-    "true",
-    "try",
-    "typeof",
-    "undefined",
-    "var",
-    "void",
-    "while",
-    "with",
-    "yield",
-    "async",
-    "of",
-    "static",
-    "get",
-    "set",
-    "Math",
-    "document",
-    "window",
-    "length",
-    "prototype",
-    "Array",
-    "Object",
-    "Float32Array",
-    "Uint8Array",
-    "Int32Array",
-    "Uint32Array",
-    "float",
-    "int",
-    "uint",
-    "bool",
-    "vec2",
-    "vec3",
-    "vec4",
-    "ivec2",
-    "ivec3",
-    "ivec4",
-    "uvec2",
-    "uvec3",
-    "uvec4",
-    "bvec2",
-    "bvec3",
-    "bvec4",
-    "mat2",
-    "mat3",
-    "mat4",
-    "sampler2D",
-    "sampler3D",
-    "uniform",
-    "varying",
-    "attribute",
-    "out",
-    "inout",
-    "precision",
-    "highp",
-    "mediump",
-    "lowp",
-    "main",
-    "gl_FragColor",
-    "gl_FragCoord",
-    "gl_Position",
-    "gl_VertexID",
-    "texture",
-    "texture2D",
-    "sin",
-    "cos",
-    "tan",
-    "atan",
-    "pow",
-    "exp",
-    "log",
-    "sqrt",
-    "abs",
-    "sign",
-    "floor",
-    "ceil",
-    "fract",
-    "mod",
-    "min",
-    "max",
-    "clamp",
-    "mix",
-    "step",
-    "smoothstep",
-    "length",
-    "distance",
-    "dot",
-    "cross",
-    "normalize",
-    "reflect",
-    "refract",
-];
 
 fn times(count: f64) -> String {
     if count == 1. {
