@@ -2,7 +2,9 @@
 
 All notable changes to rootsqz and its npm packages. The crate and all npm packages share one version.
 
-The release workflow uses the section of a version as the notes of its GitHub release, so add a section before tagging a release.
+Changes that are not released yet are listed under Unreleased. On a release, that section gets the version and the date. The release workflow uses the section of a version as the notes of its GitHub release.
+
+## [Unreleased]
 
 ## [0.5.1] - 2026-10-19
 

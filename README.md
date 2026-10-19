@@ -137,7 +137,7 @@ pnpm run build                  # build the packages and the vite example
 The crate and all npm packages have the same version. Set it with `node scripts/set-version.mjs <version>`.
 
 ### Releasing
-Add a section for the version to [CHANGELOG.md](CHANGELOG.md), then:
+In [CHANGELOG.md](CHANGELOG.md), change `## [Unreleased]` to the version and the date, add an empty `## [Unreleased]` above it and a link reference for the version at the end. Then:
 ```sh
 node scripts/set-version.mjs 0.5.0
 git commit -am "Release 0.5.0"
