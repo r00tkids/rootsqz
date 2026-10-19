@@ -522,12 +522,20 @@ pub fn render_output(
     })
 }
 
+/// Raw deflate with zopfli, which finds a smaller encoding than zlib at its best level
 fn deflate_text(text: &str) -> Result<Vec<u8>> {
     let mut encoded_data = Vec::new();
-    let mut writer =
-        flate2::write::DeflateEncoder::new(&mut encoded_data, flate2::Compression::best());
-    writer.write_all(text.as_bytes())?;
-    writer.finish()?;
+    let options = zopfli::Options {
+        // The boot code is a few KiB, so many iterations take well under a second
+        iteration_count: std::num::NonZeroU64::new(1000).unwrap(),
+        ..Default::default()
+    };
+    zopfli::compress(
+        options,
+        zopfli::Format::Deflate,
+        text.as_bytes(),
+        &mut encoded_data,
+    )?;
     Ok(encoded_data)
 }
 
