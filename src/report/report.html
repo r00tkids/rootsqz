@@ -1023,10 +1023,11 @@ const panels = {
     p.appendChild(note("Hover a byte for details, click to pin them, double-click to open its original source. Find with / then Enter and Shift+Enter. Escape clears the selection. Dim hides cheap bytes. The strip on the right shows the whole stream, or the open source; click or drag it to jump. Click a file header to collapse it."));
   },
 };
-let current = "Suggestions";
+const tabOrder = ["Files", "Top", "Suggestions", "Output", "Models", "About"];
+let current = tabOrder[0];
 function showPanel(name) {
   current = name;
-  $("tabs").innerHTML = Object.keys(panels).map(k => `<button class="${k === name ? "on" : ""}">${k}</button>`).join("");
+  $("tabs").innerHTML = tabOrder.map(k => `<button class="${k === name ? "on" : ""}">${k}</button>`).join("");
   const p = $("panel"); p.innerHTML = ""; panels[name](p);
 }
 $("tabs").onclick = e => { if (e.target.tagName === "BUTTON") showPanel(e.target.textContent); };
