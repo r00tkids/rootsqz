@@ -116,6 +116,36 @@ export function run(args: string[], options: RunOptions = {}): Promise<void> {
 }
 
 /**
+ * Loader shown while the web output decompresses.
+ * Either `preset`, or your own `html` and `js`; the executable rejects `preset` combined with `html` or `js`.
+ */
+export type LoaderOptions = {
+  /**
+   * Built-in loader (`--loader`): `"spinner"`, with the decoder running in one go,
+   * or `"bar"`, a progress bar with the decoder running in slices.
+   */
+  preset?: "spinner" | "bar";
+
+  /**
+   * File with the markup and CSS of the loader (`--loader-html`). It is packed as it is, without minification.
+   */
+  html?: string;
+
+  /**
+   * File with the script of the loader (`--loader-js`). It runs after the markup is inserted and sets
+   * `rsqz.progress = (done, total) => ...`, which is called with the number of decoded bytes.
+   * The decoder then runs in slices, so the page repaints while decoding.
+   */
+  js?: string;
+
+  /**
+   * Keep the loader when the main JavaScript runs, instead of clearing the page (`--loader-keep`).
+   * The demo can then continue the progress with `rsqz.progress` and removes the loader itself.
+   */
+  keep?: boolean;
+};
+
+/**
  * Options of `compress`. They correspond to the command line options of the executable.
  */
 export type CompressOptions = RunOptions & {
@@ -168,6 +198,11 @@ export type CompressOptions = RunOptions & {
   report?: boolean;
 
   /**
+   * Loader shown while the web output decompresses (`--loader`, `--loader-html`, `--loader-js`, `--loader-keep`).
+   */
+  loader?: LoaderOptions;
+
+  /**
    * Further arguments passed to the executable as they are.
    */
   extraArgs?: string[];
@@ -208,6 +243,18 @@ export function compressArgs(options: CompressOptions): string[] {
   }
   if (options.report) {
     args.push("--report");
+  }
+  if (options.loader?.preset) {
+    args.push("--loader", options.loader.preset);
+  }
+  if (options.loader?.html) {
+    args.push("--loader-html", options.loader.html);
+  }
+  if (options.loader?.js) {
+    args.push("--loader-js", options.loader.js);
+  }
+  if (options.loader?.keep) {
+    args.push("--loader-keep");
   }
   args.push(...(options.extraArgs ?? []));
 

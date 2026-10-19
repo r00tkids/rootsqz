@@ -133,6 +133,7 @@ Notes:
   document.body.insertAdjacentHTML("beforeend", "<canvas id=c>");
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
+- To show a loader while the output decompresses, set `loader: { preset: "spinner" }` or `{ preset: "bar" }`, or your own `{ html, js }` files. See [Loader](#loader).
 
 See the [plugin README](packages/rollup-plugin-rootsqz) for all options and [examples/vite](examples/vite) for a working project with `vite-plugin-glsl`.
 

@@ -46,6 +46,12 @@ await compress({
      * "4k" (default) or "64k"
      */
     sizeProfile: '64k',
+
+    /**
+     * Loader shown while the web output decompresses: `preset` "spinner" or "bar",
+     * or your own `html` and `js` files. `keep` leaves it in place when the main JavaScript runs.
+     */
+    loader: { preset: 'bar' },
 });
 ```
 
@@ -58,7 +64,7 @@ await compress({
 | `toolEnvironment(env)` | Environment that points the executable to the bundled uglify-js. |
 | `RUNTIME_GLOBAL` | Name of the global that holds the packed files in the output: `rsqz`. |
 
-In the packed JavaScript, `rsqz.files["<file name>"]` is the content of a packed file as an `Uint8Array`.
+In the packed JavaScript, `rsqz.files["<file name>"]` is the content of a packed file as an `Uint8Array`. A loader script sets `rsqz.progress = (done, total) => ...`, see [Loader](https://github.com/r00tkids/rootsqz#loader).
 
 ## Environment variables
 - `ROOTSQZ_BINARY_PATH`: path of a rootsqz executable to use instead of the installed one.

@@ -3,7 +3,9 @@ import querystring from "node:querystring";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createFilter, FilterPattern } from "@rollup/pluginutils";
-import { compress, RUNTIME_GLOBAL } from "@r00tkids/rootsqz";
+import { compress, RUNTIME_GLOBAL, type LoaderOptions } from "@r00tkids/rootsqz";
+
+export type { LoaderOptions };
 
 /**
  * A file that is passed to rootsqz next to the JavaScript bundle.
@@ -95,6 +97,13 @@ export type RootsqzOptions = {
    * Write a detailed compression report next to the output (`--report`).
    */
   report?: boolean;
+
+  /**
+   * Loader shown while the output decompresses: a built-in `preset` ("spinner" or "bar"),
+   * or your own `html` and `js` files. `keep` leaves it in place when the bundle runs.
+   * Paths are relative to the working directory.
+   */
+  loader?: LoaderOptions;
 
   /**
    * Name of the global that the boot code of the executable puts the files in.
@@ -350,6 +359,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
           brotli: options.brotli,
           config: options.config,
           report: options.report,
+          loader: options.loader,
           extraArgs: options.rootsqzArgs,
         });
 
