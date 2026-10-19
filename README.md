@@ -137,13 +137,14 @@ pnpm run build                  # build the packages and the vite example
 The crate and all npm packages have the same version. Set it with `node scripts/set-version.mjs <version>`.
 
 ### Releasing
+Add a section for the version to [CHANGELOG.md](CHANGELOG.md), then:
 ```sh
 node scripts/set-version.mjs 0.5.0
 git commit -am "Release 0.5.0"
 git tag v0.5.0
 git push origin main v0.5.0
 ```
-The tag starts the release workflow. It builds the executables for all targets, creates the GitHub release and publishes the npm packages. The tag must be `v` followed by the full version, otherwise nothing is published to npm. A version with a prerelease part, e.g. `0.5.0-rc.1`, is published under the npm tag `next`.
+The tag starts the release workflow. It builds the executables for all targets, publishes the npm packages and creates the GitHub release, with the section of the version in CHANGELOG.md as its notes. A version without a section fails the workflow before anything is published. The tag must be `v` followed by the full version, otherwise nothing is published to npm. A version with a prerelease part, e.g. `0.5.0-rc.1`, is published under the npm tag `next`.
 
 Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): each package names this repository and `release.yml` as its trusted publisher on npmjs.com, so no npm token is stored. A new package cannot have a trusted publisher before it exists, so its first version needs a token (as the repository secret `NPM_TOKEN`, passed to the publish step as `NODE_AUTH_TOKEN`) or a manual `npm publish`. Afterwards, configure its trusted publisher with `npm trust github @r00tkids/<name> --file release.yml --repo r00tkids/rootsqz --allow-publish` and remove the token again.
 

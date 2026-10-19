@@ -60,7 +60,7 @@ jobs:
   # The GitHub release waits for npm: a version on npm cannot be published again,
   # while a release can be deleted and created again.
   release:
-    needs: [build, publish-npm]
+    needs: [build, release-notes, publish-npm]
     name: Create Release
     runs-on: ubuntu-latest
     permissions:
@@ -72,6 +72,10 @@ jobs:
           pattern: rootsqz-*
           path: bin
           merge-multiple: false
+      - name: Download the release notes
+        uses: actions/download-artifact@v6
+        with:
+          name: release-notes
       - name: Name the assets after their target
         run: |
           mkdir assets
@@ -88,8 +92,25 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
+          body_path: release-notes.md
           files: assets/*
           fail_on_unmatched_files: true
+  # The notes of the GitHub release are the section of the version in CHANGELOG.md.
+  # Read them before anything is published, so a missing section fails early.
+  release-notes:
+    name: Read the release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the section of the version from CHANGELOG.md
+        run: node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > release-notes.md
+      - name: Upload the release notes
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+          retention-days: 2
   # When the OIDC exchange fails, npm publishes with the placeholder token of setup-node,
   # and the registry answers with a bare 404. Try the exchange for every package first,
   # in parallel with the builds, so a missing trusted publisher fails early and clearly.
@@ -131,7 +152,7 @@ jobs:
             exit 1
           fi
   publish-npm:
-    needs: [build, npm-auth]
+    needs: [build, release-notes, npm-auth]
     name: Publish to npm
     runs-on: ubuntu-latest
     permissions:

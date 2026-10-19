@@ -2,6 +2,8 @@
 
 All notable changes to rootsqz and its npm packages. The crate and all npm packages share one version.
 
+The release workflow uses the section of a version as the notes of its GitHub release, so add a section before tagging a release.
+
 ## [0.5.0] - 2026-10-19
 
 ### Changed
