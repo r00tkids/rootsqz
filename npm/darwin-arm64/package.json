@@ -1,6 +1,6 @@
 {
   "name": "@r00tkids/rootsqz-darwin-arm64",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "The aarch64-apple-darwin executable of rootsqz.",
   "license": "MIT",
   "repository": {

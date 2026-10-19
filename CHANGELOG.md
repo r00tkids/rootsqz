@@ -6,12 +6,14 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-20
+
 ### Added
 - `--loader progress` (`loader: { preset: "progress" }`), a loader with the browser's own progress bar, a `<progress>` element. It is the smallest preset with progress.
 
 ### Changed
 - Every web output is about 180 bytes smaller: the names in the boot code are now minified, it is minified in 3 passes, and deflated with zopfli instead of zlib. The main JavaScript now runs in the global scope, like a script, instead of in a function of the boot code.
-- The loaders are smaller: in the ray tracer test, `--loader bar` adds 256 bytes instead of 369, and `--loader spinner` 197 instead of 221. Outputs with a loader script no longer also contain the synchronous decoder, and leading and trailing whitespace of `--loader-html` is no longer packed.
+- The loaders are smaller: in the ray tracer test, `--loader bar` adds 271 bytes instead of 369, and `--loader spinner` 195 instead of 221. Outputs with a loader script no longer also contain the synchronous decoder, and leading and trailing whitespace of `--loader-html` is no longer packed.
 - `rsqz.progress` is first called after the first slice of decoding, no longer with 0 before it starts.
 
 ## [0.6.0] - 2026-10-20
@@ -86,6 +88,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.7.0]: https://github.com/r00tkids/rootsqz/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/r00tkids/rootsqz/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/r00tkids/rootsqz/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/r00tkids/rootsqz/compare/v0.4.3...v0.5.0
