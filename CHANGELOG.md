@@ -6,6 +6,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Changed
+- Outputs with a loader script (`--loader bar`, `--loader-js`) are about 70 bytes smaller: they no longer also contain the synchronous decoder.
+
 ## [0.6.0] - 2026-10-20
 
 ### Added

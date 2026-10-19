@@ -1,5 +1,5 @@
 
-// Decodes like decompress, but in slices of about 12 ms, so the browser can paint in between.
+// Decodes like decompress (decompress.js), but in slices of about 12 ms, so the browser can paint in between.
 // Calls rsqz.progress(done, total), if set, after each slice. Resolves to the decoded bytes.
 let decompressSliced = (model, data, encodedLen, decodedLen) => new Promise(resolve => {
     let decoder = ArithmeticDecoder(data, encodedLen);

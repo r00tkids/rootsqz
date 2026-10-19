@@ -348,9 +348,12 @@ pub fn render_output(
     let mut features_used = ModelRef::None;
     let mut decompression_code =
         generate_js_decompression_code(&model_config, &static_model_params, &mut features_used);
+    // Only the decoder that the boot code calls is included
     let sliced = loader.as_ref().is_some_and(|loader| loader.js.is_some());
     if sliced {
         decompression_code += include_str!("js_source/coder_sliced.js");
+    } else {
+        decompression_code += include_str!("js_source/decompress.js");
     }
 
     Ok(match target {
