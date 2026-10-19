@@ -6,7 +6,7 @@
 <title>rootsqz report</title>
 <style>
 :root {
-  --bar-h: 42px;
+  --bar-h: 42px; --mag-l: 38%;
   --k-hotspot: #c2410c; --k-identifier: #2a62c9; --k-number: #7c3aed; --k-repeat: #0f766e;
   --k-source: #15803d; --k-model: #a21caf; --k-pre-compress: #b45309;
   --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc; --panel: #f2f1ed;
@@ -14,7 +14,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root { --k-hotspot: #fb923c; --k-identifier: #7aa7ff; --k-number: #b794f6; --k-repeat: #2dd4bf;
-    --k-source: #4ade80; --k-model: #e879f9; --k-pre-compress: #fbbf24; }
+    --k-source: #4ade80; --k-model: #e879f9; --k-pre-compress: #fbbf24; --mag-l: 60%; }
   :root { --bg: #161615; --fg: #e8e7e3; --muted: #9a9993; --line: #33322f; --panel: #1f1f1d; --accent: #7aa7ff; --hl: #7aa7ff; }
 }
 * { box-sizing: border-box; }
@@ -57,6 +57,7 @@ code { font: 12px var(--mono); word-break: break-all; }
 .sugg { padding: 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
 .sugg:hover { background: var(--bg); }
 .sugg .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+.sugg .mag { font-weight: 600; }
 .sugg .q { color: var(--muted); font: 11px var(--mono); margin-top: 2px; }
 h2 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); font-weight: 600; }
 p.note { color: var(--muted); font-size: 12.5px; }
@@ -285,10 +286,12 @@ const note = t => Object.assign(document.createElement("p"), { className: "note"
 const panels = {
   "Suggestions": p => {
     p.appendChild(note("Candidates worth looking into, largest cost first. They are heuristics: compress again to see what a change saves. Click one to show it."));
+    const maxBits = Math.max(1e-9, ...S.suggestions.map(s => s.bits));
     for (const s of S.suggestions) {
+      const mag = s.bits ? ` · <span class="mag" style="color: hsl(${Math.round(125 * (1 - s.bits / maxBits))} 80% var(--mag-l))">${fmt(s.bits / 8)} bytes</span>` : "";
       const d = document.createElement("div");
       d.className = "sugg";
-      d.innerHTML = `<div class="k" style="color: var(--k-${esc(s.kind)}, var(--accent))">${esc(s.kind)}${s.bits ? ` · ${fmt(s.bits / 8)} bytes` : ""}</div><div>${esc(s.message)}</div><div class="q">rootsqz report &lt;dir&gt; ${esc(s.query)}</div>`;
+      d.innerHTML = `<div class="k" style="color: var(--k-${esc(s.kind)}, var(--accent))">${esc(s.kind)}${mag}</div><div>${esc(s.message)}</div><div class="q">rootsqz report &lt;dir&gt; ${esc(s.query)}</div>`;
       if (s.start != null) d.onclick = () => goTo(s.start, s.end);
       p.appendChild(d);
     }
