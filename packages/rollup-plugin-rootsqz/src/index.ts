@@ -35,6 +35,11 @@ type RootSqzFile = {
    * Is it text? The import then gives a string instead of an `Uint8Array`.
    */
   isText: boolean;
+
+  /**
+   * Was made by one of the `fileTransforms`, so it differs from the file on disk.
+   */
+  transformed: boolean;
 };
 
 /**
@@ -211,7 +216,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
     return candidateName;
   }
 
-  const loadAndTransform = async function (id: string, hookRes: RootsqzFileTransformRes) {
+  const loadAndTransform = async function (id: string, hookRes: RootsqzFileTransformRes, transformed = false) {
     if (isBuild) {
       const fileName = findNextAvailableFileName();
       files.set(id, {
@@ -220,6 +225,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
         isCompressed: hookRes.isCompressed,
         fileExt: hookRes.fileExt ?? path.extname(id),
         isText: hookRes.isText,
+        transformed,
       });
 
       return {
@@ -276,7 +282,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
               if (hookRes == null) {
                 continue;
               }
-              return await loadAndTransform(id, hookRes);
+              return await loadAndTransform(id, hookRes, true);
             }
           }
         }
@@ -359,8 +365,11 @@ export default function (options: RootsqzOptions = {}): Plugin {
           await fs.mkdir(path.dirname(outPath), { recursive: true });
           await fs.writeFile(outPath, file.content);
 
+          // The module id, with the query that tells how it was imported
           const qIdx = id.indexOf("?");
-          reportLabels[path.relative(".", outPath)] = path.relative(".", qIdx === -1 ? id : id.slice(0, qIdx));
+          const query = qIdx === -1 ? "" : id.slice(qIdx);
+          reportLabels[path.relative(".", outPath)] =
+            path.relative(".", qIdx === -1 ? id : id.slice(0, qIdx)) + query + (file.transformed ? " (transformed)" : "");
 
           if (file.isCompressed) {
             preCompressedFiles.push(path.relative(".", outPath));
