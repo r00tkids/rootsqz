@@ -560,7 +560,9 @@ fn uglify_command(default_program: &str) -> Command {
 
 fn spawn_uglify(default_program: &str) -> std::io::Result<std::process::Child> {
     uglify_command(default_program)
+        // More passes make the boot code a little smaller, e.g. 27 bytes after deflate for the ray tracer test
         .arg("--compress")
+        .arg("passes=3")
         .arg("--mangle")
         .arg("--toplevel")
         .stdin(Stdio::piped())
