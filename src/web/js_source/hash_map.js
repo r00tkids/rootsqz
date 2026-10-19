@@ -2,10 +2,10 @@ let HashMap = (pow2Size, itemSize, defaultValue, itemEncoder, itemDecoder) => {
     let data = new Uint8Array(2 ** pow2Size * itemSize);
     let mask = (1 << pow2Size) - 1;
 
-    let defaultValueBuffer = new Uint8Array(itemSize);
-    itemEncoder(new DataView(defaultValueBuffer.buffer), defaultValue);
-    for (let i = 0; i < 2 ** pow2Size; i++) {
-        data.set(defaultValueBuffer, i * itemSize);
+    // Write the default value into the first item, then double the filled part until the table is full
+    itemEncoder(new DataView(data.buffer), defaultValue);
+    for (let n = itemSize; n < data.length; n *= 2) {
+        data.copyWithin(n, 0, n);
     }
 
     return {
