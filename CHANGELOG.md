@@ -4,6 +4,11 @@ All notable changes to rootsqz and its npm packages. The crate and all npm packa
 
 The release workflow uses the section of a version as the notes of its GitHub release, so add a section before tagging a release.
 
+## [0.5.1] - 2026-10-19
+
+### Added
+- CHANGELOG.md, whose section of a version is the notes of its GitHub release.
+
 ## [0.5.0] - 2026-10-19
 
 ### Changed
@@ -62,6 +67,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.5.1]: https://github.com/r00tkids/rootsqz/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/r00tkids/rootsqz/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/r00tkids/rootsqz/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/r00tkids/rootsqz/compare/v0.4.1...v0.4.2
