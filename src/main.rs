@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use human_panic::{setup_panic, Metadata};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -8,13 +8,13 @@ mod report;
 mod web;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about)]
+#[command(author, version, about, args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
     #[command(flatten)]
-    default_args: web::Args,
+    default_args: Option<web::Args>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -36,9 +36,16 @@ fn main() -> Result<()> {
 
     let args = Cli::parse();
 
-    let command = args
-        .command
-        .unwrap_or_else(|| Commands::Web(args.default_args));
+    let command = match (args.command, args.default_args) {
+        (Some(command), _) => command,
+        (None, Some(default_args)) => Commands::Web(default_args),
+        (None, None) => Cli::command()
+            .error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "the following required arguments were not provided: --js-main, --output-directory",
+            )
+            .exit(),
+    };
     match command {
         Commands::Web(web_args) => web::run(web_args),
     }

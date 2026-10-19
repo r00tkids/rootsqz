@@ -6,6 +6,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Fixed
+- `rootsqz web …` works. It failed because the options were also required before the subcommand.
+
 ## [0.7.0] - 2026-10-20
 
 ### Added
