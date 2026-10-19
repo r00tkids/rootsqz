@@ -6,6 +6,7 @@
 <title>rootsqz report</title>
 <style>
 :root {
+  --bar-h: 42px;
   --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc; --panel: #f2f1ed;
   --accent: #2a62c9; --hl: #2a62c9; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -21,12 +22,12 @@ h1 { font-size: 16px; margin: 0; }
 #layout { display: grid; grid-template-columns: minmax(320px, 34%) 1fr; height: calc(100vh - 49px); }
 @media (max-width: 800px) { #layout { grid-template-columns: 1fr; height: auto; } }
 aside { border-right: 1px solid var(--line); overflow: auto; background: var(--panel); }
-nav { display: flex; flex-wrap: wrap; gap: 2px; padding: 8px 8px 0; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); }
-nav button { border: 0; background: none; color: var(--muted); padding: 6px 10px; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
+nav { display: flex; flex-wrap: wrap; gap: 2px; min-height: var(--bar-h); padding: 0 8px; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); }
+nav button { height: var(--bar-h); border: 0; background: none; color: var(--muted); padding: 2px 10px 0; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
 nav button.on { color: var(--fg); border-bottom-color: var(--accent); }
 #panel { padding: 8px 12px 24px; }
 main { overflow: auto; display: flex; flex-direction: column; }
-#toolbar { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+#toolbar { position: sticky; top: 0; z-index: 2; min-height: var(--bar-h); background: var(--bg); border-bottom: 1px solid var(--line); padding: 4px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 select { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; max-width: 100%; }
 #legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 #legend .bar { display: flex; height: 12px; }
