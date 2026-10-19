@@ -15,6 +15,8 @@ pub struct SourceFile {
 }
 
 /// Position in an original source: index in `sources`, 1-based line and column.
+/// Column 0 means that the generated line is the same as the source line, so a byte is at
+/// the same column in both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourcePos {
     pub source: u32,
@@ -82,54 +84,63 @@ impl SourceMapping {
             .collect::<Vec<_>>();
 
         let segments = decode_mappings(&raw.mappings)?;
+        let source_lines: Vec<Option<Vec<&str>>> = sources
+            .iter()
+            .map(|s| s.content.as_deref().map(|c| c.lines().collect()))
+            .collect();
         let mut positions = vec![None; js.len()];
         let mut line_start = 0;
-        for (line, line_segments) in js.split(|&b| b == b'\n').enumerate() {
+        let mut carried: Option<Carried> = None;
+        for (line, line_bytes) in js.split(|&b| b == b'\n').enumerate() {
             let segments: &[Segment] = segments.get(line).map_or(&[], |s| s.as_slice());
+
+            // Bytes before the first mapping of a line, e.g. the lines of a multi-line string.
+            let mut current = carried
+                .as_mut()
+                .and_then(|c| c.continue_to(line, line_bytes, &source_lines));
+
             // Source map columns count UTF-16 code units.
             let mut column = 0u32;
             let mut next = 0;
-            let mut current: Option<&Segment> = None;
             let mut i = 0;
-            while i < line_segments.len() {
-                let b = line_segments[i];
-                let char_len = match b {
+            while i < line_bytes.len() {
+                let char_len = match line_bytes[i] {
                     0x00..=0x7f => 1,
                     0xc0..=0xdf => 2,
                     0xe0..=0xef => 3,
                     0xf0..=0xff => 4,
                     _ => 1,
                 }
-                .min(line_segments.len() - i);
+                .min(line_bytes.len() - i);
                 while next < segments.len() && segments[next].column <= column {
-                    current = Some(&segments[next]);
-                    next += 1;
-                }
-                let pos = current
-                    .and_then(|s| s.source)
-                    .map(|(source, l, c)| SourcePos {
+                    current = segments[next].source.map(|(source, l, c)| SourcePos {
                         source,
                         line: l + 1,
                         column: c + 1,
                     });
+                    next += 1;
+                }
                 for k in 0..char_len {
-                    positions[line_start + i + k] = pos;
+                    positions[line_start + i + k] = current;
                 }
                 column += if char_len == 4 { 2 } else { 1 };
                 i += char_len;
             }
-            // The newline belongs to the last segment of the line.
-            if line_start + line_segments.len() < js.len() {
-                positions[line_start + line_segments.len()] =
-                    current
-                        .and_then(|s| s.source)
-                        .map(|(source, l, c)| SourcePos {
-                            source,
-                            line: l + 1,
-                            column: c + 1,
-                        });
+            // The newline belongs to the last mapping of the line.
+            if line_start + line_bytes.len() < js.len() {
+                positions[line_start + line_bytes.len()] = current;
             }
-            line_start += line_segments.len() + 1;
+            if let Some(last) = segments.last() {
+                carried = last.source.map(|(source, l, c)| Carried {
+                    source,
+                    line: l,
+                    column: c,
+                    generated_line: line,
+                    next_search: l as usize,
+                    matched: false,
+                });
+            }
+            line_start += line_bytes.len() + 1;
         }
         for pos in positions.iter().flatten() {
             ensure!(
@@ -145,6 +156,78 @@ impl SourceMapping {
             sources,
             positions,
         })
+    }
+}
+
+/// The last mapping of an earlier generated line, for the lines after it that have no mapping
+/// at their start, such as the lines of a multi-line string.
+struct Carried {
+    source: u32,
+    /// Line and column of the mapping, 0-based.
+    line: u32,
+    column: u32,
+    generated_line: usize,
+    /// Source line to search the next generated line from.
+    next_search: usize,
+    /// Whether an earlier generated line was found in the source.
+    matched: bool,
+}
+
+/// A line without whitespace and `//` comments, to find minified lines in their source.
+fn normalize(line: &str) -> String {
+    let code = line.find("//").map_or(line, |i| &line[..i]);
+    code.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+impl Carried {
+    /// Where the bytes at the start of `generated_line` come from:
+    /// - the source line at the same distance from the mapping, if it is the same line, as in a
+    ///   multi-line template literal;
+    /// - otherwise the next source line that is the same without whitespace and comments, as in a
+    ///   minified copy of the source;
+    /// - otherwise the line found last, or the start of the source if the mapping is at the start
+    ///   of it, as for a whole imported file;
+    /// - otherwise nothing, because the line may belong to code without a mapping.
+    fn continue_to(
+        &mut self,
+        generated_line: usize,
+        line_bytes: &[u8],
+        source_lines: &[Option<Vec<&str>>],
+    ) -> Option<SourcePos> {
+        let lines = source_lines
+            .get(self.source as usize)
+            .and_then(|l| l.as_ref());
+        let pos = |line: usize, column: u32| SourcePos {
+            source: self.source,
+            line: line as u32 + 1,
+            column,
+        };
+        if let Some(lines) = lines {
+            let estimate = self.line as usize + (generated_line - self.generated_line);
+            let same = lines
+                .get(estimate)
+                .is_some_and(|text| text.trim_end_matches('\r').as_bytes() == line_bytes);
+            if same {
+                self.next_search = estimate + 1;
+                self.matched = true;
+                return Some(pos(estimate, 0));
+            }
+            let wanted = normalize(&String::from_utf8_lossy(line_bytes));
+            if wanted.len() >= 4 {
+                let end = (self.next_search + 400).min(lines.len());
+                if let Some(found) =
+                    (self.next_search..end).find(|&k| normalize(lines[k]) == wanted)
+                {
+                    self.next_search = found + 1;
+                    self.matched = true;
+                    return Some(pos(found, 1));
+                }
+            }
+            if self.matched {
+                return Some(pos(self.next_search.saturating_sub(1), 1));
+            }
+        }
+        (self.line == 0 && self.column == 0).then(|| pos(0, 1))
     }
 }
 
@@ -251,19 +334,82 @@ fn resolve_source(
             other => normal.push(other),
         }
     }
-    if let Some(cwd) = cwd {
-        if let Ok(relative) = normal.strip_prefix(cwd) {
-            return relative.display().to_string();
-        }
+    match cwd {
+        Some(cwd) if normal.is_absolute() => relative_to(&normal, cwd).display().to_string(),
+        _ => normal.display().to_string(),
     }
-    normal.display().to_string()
+}
+
+/// `path` relative to `base`, with `..` where needed. Both are absolute and normalized.
+fn relative_to(path: &Path, base: &Path) -> PathBuf {
+    let path: Vec<_> = path.components().collect();
+    let base: Vec<_> = base.components().collect();
+    let common = path.iter().zip(&base).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return path.iter().collect();
+    }
+    let mut relative = PathBuf::new();
+    for _ in common..base.len() {
+        relative.push("..");
+    }
+    relative.extend(&path[common..]);
+    relative
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use super::{decode_vlq, SourceMapping, SourcePos};
+    use super::{decode_vlq, relative_to, SourceMapping, SourcePos};
+
+    #[test]
+    fn relative_paths() {
+        let rel = |p: &str, b: &str| {
+            relative_to(Path::new(p), Path::new(b))
+                .display()
+                .to_string()
+        };
+        assert_eq!(rel("/a/b/c.ts", "/a/b"), "c.ts");
+        assert_eq!(rel("/a/x/c.ts", "/a/b/d"), "../../x/c.ts");
+    }
+
+    #[test]
+    fn template_literal_lines() {
+        // Line 1 maps "f(`" to t.ts line 1. The literal is the same as in t.ts on lines 2 and 4,
+        // minified on line 3, and changed on line 5, which is too short to search for.
+        let map = r#"{"version":3,"sources":["t.ts"],
+            "sourcesContent":["f(`\nstruct A\n  let  y = 1; // c\n}\n`)"],"mappings":"AAAA"}"#;
+        let js = "f(`\nstruct A\nlet y=1;\n}\n`);".as_bytes();
+        let m = SourceMapping::parse(map, Path::new("t.js.map"), js).unwrap();
+        let pos = |line, column| {
+            Some(SourcePos {
+                source: 0,
+                line,
+                column,
+            })
+        };
+        assert_eq!(m.positions[4], pos(2, 0), "same line");
+        assert_eq!(
+            m.positions[13],
+            pos(3, 1),
+            "same without whitespace and comments"
+        );
+        assert_eq!(m.positions[22], pos(4, 0), "same line");
+        assert_eq!(
+            m.positions[24],
+            pos(4, 1),
+            "short line: the line found last"
+        );
+    }
+
+    #[test]
+    fn code_without_mapping() {
+        // Line 2 is code that the source map does not cover, e.g. an imported file without a map.
+        let map = r#"{"version":3,"sources":["t.ts"],"sourcesContent":["a();\n}"],"mappings":"AAAA,IACA"}"#;
+        let js = "a();}\nconst shader = 1;".as_bytes();
+        let m = SourceMapping::parse(map, Path::new("t.js.map"), js).unwrap();
+        assert_eq!(m.positions[6], None);
+    }
 
     #[test]
     fn vlq() {
