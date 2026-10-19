@@ -7,71 +7,128 @@
 <style>
 :root {
   --bar-h: 42px; --mag-l: 38%;
+  --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc; --panel: #f2f1ed;
+  --accent: #2a62c9; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --k-hotspot: #c2410c; --k-identifier: #2a62c9; --k-number: #7c3aed; --k-repeat: #0f766e;
   --k-source: #15803d; --k-model: #a21caf; --k-pre-compress: #b45309;
-  --bg: #fbfbfa; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc; --panel: #f2f1ed;
-  --accent: #2a62c9; --hl: #2a62c9; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sel: rgba(42, 98, 201, .45); --hover: rgba(0, 0, 0, .28); --find: #fde047; --find-cur: #fb923c;
 }
 @media (prefers-color-scheme: dark) {
   :root { --k-hotspot: #fb923c; --k-identifier: #7aa7ff; --k-number: #b794f6; --k-repeat: #2dd4bf;
-    --k-source: #4ade80; --k-model: #e879f9; --k-pre-compress: #fbbf24; --mag-l: 60%; }
-  :root { --bg: #161615; --fg: #e8e7e3; --muted: #9a9993; --line: #33322f; --panel: #1f1f1d; --accent: #7aa7ff; --hl: #7aa7ff; }
+    --k-source: #4ade80; --k-model: #e879f9; --k-pre-compress: #fbbf24; --mag-l: 60%;
+    --bg: #161615; --fg: #e8e7e3; --muted: #9a9993; --line: #33322f; --panel: #1f1f1d; --accent: #7aa7ff;
+    --sel: rgba(122, 167, 255, .45); --hover: rgba(255, 255, 255, .3); }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
-header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 24px; align-items: baseline; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; display: flex; flex-direction: column; }
+header.top { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 24px; align-items: baseline; flex: none; }
 h1 { font-size: 16px; margin: 0; }
 #totals { color: var(--muted); font-variant-numeric: tabular-nums; }
 #totals b { color: var(--fg); font-weight: 600; }
-#layout { display: grid; grid-template-columns: minmax(320px, 34%) 1fr; height: calc(100vh - 49px); }
-@media (max-width: 800px) { #layout { grid-template-columns: 1fr; height: auto; } }
-aside { border-right: 1px solid var(--line); overflow: auto; background: var(--panel); }
-nav { display: flex; gap: 0; height: var(--bar-h); overflow-x: auto; scrollbar-width: none; padding: 0 8px; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); }
-nav button { height: calc(var(--bar-h) - 1px); border: 0; background: none; color: var(--muted); padding: 2px 9px 0; flex: none; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
+#layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 32%) 1fr; }
+@media (max-width: 800px) { #layout { grid-template-columns: 1fr; grid-template-rows: 40vh 1fr; } }
+aside { border-right: 1px solid var(--line); overflow: auto; background: var(--panel); min-height: 0; }
+nav { display: flex; height: var(--bar-h); padding: 0 8px; overflow-x: auto; scrollbar-width: none; position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); }
+nav button { height: calc(var(--bar-h) - 1px); flex: none; border: 0; background: none; color: var(--muted); padding: 2px 9px 0; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
 nav button.on { color: var(--fg); border-bottom-color: var(--accent); }
 #panel { padding: 8px 12px 24px; }
-main { overflow: auto; display: flex; flex-direction: column; }
-#toolbar { position: sticky; top: 0; z-index: 2; min-height: var(--bar-h); background: var(--bg); border-bottom: 1px solid var(--line); padding: 4px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
-select { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; max-width: 100%; }
-#legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-#legend .bar { display: flex; height: 12px; }
-#legend .bar span { width: 10px; }
-#sections { padding: 8px 16px 40vh; }
-details { margin: 8px 0 16px; }
-details > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
-details > summary small { font-weight: 400; color: var(--muted); margin-left: 8px; }
-pre.text { font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; margin: 0; }
-.hex { font: 12px/1.6 var(--mono); }
-.hex .row { display: flex; gap: 12px; }
-.hex .addr { color: var(--muted); width: 7ch; flex: none; text-align: right; }
-.hex .bytes span { display: inline-block; width: 2.6ch; text-align: center; }
-.nl::before { content: "↵"; color: var(--muted); opacity: .6; }
-.hl { outline: 2px solid var(--hl); outline-offset: -1px; }
+main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+#toolbar { flex: none; background: var(--bg); border-bottom: 1px solid var(--line); padding: 4px 12px; min-height: 42px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; }
+#toolbar label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+select, input[type=search], .btn { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
+select { max-width: 190px; }
+input[type=search] { width: 150px; }
+input[type=range] { width: 80px; }
+.btn { cursor: pointer; padding: 3px 8px; line-height: 1.3; }
+.btn:hover { border-color: var(--muted); }
+.btn:disabled { opacity: .4; cursor: default; }
+.segm { display: inline-flex; }
+.segm .btn { border-radius: 0; }
+.segm .btn:first-child { border-radius: 5px 0 0 5px; }
+.segm .btn:last-child { border-radius: 0 5px 5px 0; border-left: 0; }
+.segm .btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+#findn, #dimv { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3ch; }
+#focus { display: none; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1px 4px 1px 10px; }
+#focus.on { display: inline-flex; }
+#focus button { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; }
+#viewport { flex: 1; min-height: 0; display: flex; position: relative; }
+#content, #srcview { flex: 1; min-width: 0; overflow: auto; padding: 0 16px 40vh; }
+#srcview { display: none; }
+body.source #content { display: none; }
+body.source #srcview { display: block; }
+#mini { width: 18px; flex: none; border-left: 1px solid var(--line); cursor: pointer; display: block; height: 100%; }
+#legend { position: absolute; left: 12px; bottom: 10px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; pointer-events: none; }
+#legend .bar { display: flex; height: 10px; }
+#legend .bar span { width: 8px; }
+.sec > header { position: sticky; top: 0; z-index: 1; background: var(--bg); padding: 8px 0 6px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; border-bottom: 1px solid var(--line); margin-bottom: 6px; user-select: none; }
+.sec > header b { font-weight: 600; }
+.sec > header small { color: var(--muted); }
+.sec > header .arrow { display: inline-block; width: 1em; color: var(--muted); transition: transform .1s; }
+.sec.closed > header .arrow { transform: rotate(-90deg); }
+.sec.closed > .body { display: none; }
+.sec { margin-bottom: 12px; }
+.chunk { font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; }
+.chunk.cont::before { content: "⋯"; color: var(--muted); opacity: .6; margin-right: 4px; }
+.hex { white-space: pre; font: 12px/1.6 var(--mono); }
+.hex .row { display: flex; gap: 14px; }
+.hex .addr { color: var(--muted); }
+.hex .a { color: var(--muted); }
+.nl::before { content: "↵"; color: var(--muted); opacity: .55; }
+.dim { opacity: .28; background: none !important; }
+::highlight(sel) { background-color: var(--accent); color: #fff; }
+::highlight(find) { background-color: var(--find); color: #000; }
+::highlight(cur) { background-color: var(--find-cur); color: #000; }
+::highlight(hover) { background-color: var(--hover); }
 table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 500; }
-td.num, th.num { text-align: right; }
+td.num, th.num { text-align: right; white-space: nowrap; }
 tr.click { cursor: pointer; }
 tr.click:hover { background: var(--bg); }
 code { font: 12px var(--mono); word-break: break-all; }
 .sugg { padding: 8px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
 .sugg:hover { background: var(--bg); }
-.sugg .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+.sugg .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .sugg .mag { font-weight: 600; }
 .sugg .q { color: var(--muted); font: 11px var(--mono); margin-top: 2px; }
 h2 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); font-weight: 600; }
 p.note { color: var(--muted); font-size: 12.5px; }
+input.filter { width: 100%; margin: 4px 0 8px; }
+.files details { margin: 2px 0; }
+.files summary { cursor: pointer; color: var(--muted); font: 12px var(--mono); padding: 3px 0; display: flex; gap: 8px; }
+.files summary span:first-child { flex: 1; word-break: break-all; }
+.frow { display: grid; grid-template-columns: 1fr auto 54px 22px; gap: 6px; align-items: center; padding: 2px 0 2px 14px; cursor: pointer; font-size: 12.5px; }
+.frow:hover { background: var(--bg); }
+.frow.on { background: var(--bg); box-shadow: inset 2px 0 var(--accent); }
+.frow code { word-break: break-all; }
+.frow .n { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.frow .bar { height: 6px; background: var(--accent); opacity: .7; border-radius: 3px; }
+.frow button { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; font-size: 13px; }
+.frow button:hover { color: var(--accent); }
 .layoutbar { display: flex; height: 18px; border-radius: 3px; overflow: hidden; margin: 6px 0; }
 .layoutbar span { min-width: 2px; }
-#tip { position: fixed; z-index: 10; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.15); max-width: 420px; display: none; font-variant-numeric: tabular-nums; }
+#srcview .head { position: sticky; top: 0; z-index: 1; background: var(--bg); padding: 8px 0 6px; border-bottom: 1px solid var(--line); margin-bottom: 6px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+#srcview .head small { color: var(--muted); }
+.sl { display: grid; grid-template-columns: 5ch 9ch 1fr; gap: 10px; font: 12.5px/1.5 var(--mono); }
+.sl .ln { color: var(--muted); text-align: right; user-select: none; }
+.sl .lb { color: var(--muted); text-align: right; font-size: 11px; position: relative; user-select: none; }
+.sl .lb::before { content: ""; position: absolute; right: 0; top: 3px; bottom: 3px; width: var(--w); background: var(--accent); opacity: .22; border-radius: 2px; }
+.sl .code { white-space: pre-wrap; word-break: break-all; }
+.sl .code .x { color: var(--muted); opacity: .6; }
+.sl .code span[data-s] { cursor: pointer; }
+.sl.flash { background: var(--sel); }
+#tip { position: fixed; z-index: 10; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.15); max-width: 460px; display: none; font-variant-numeric: tabular-nums; }
 #tip.pinned { pointer-events: auto; }
+#tip pre { margin: 4px 0 0; font: 11.5px var(--mono); white-space: pre-wrap; word-break: break-all; color: var(--muted); max-height: 5.5em; overflow: hidden; }
 #tip .m { display: grid; grid-template-columns: 1fr 48px 60px; gap: 1px 6px; margin-top: 6px; }
 #tip .m div.b { height: 8px; align-self: center; background: var(--accent); opacity: .7; }
 #tip .m .best { font-weight: 600; }
+#tip .hint { color: var(--muted); margin-top: 4px; }
 </style>
 </head>
 <body>
-<header>
+<header class="top">
   <h1>rootsqz compression report</h1>
   <div id="totals"></div>
 </header>
@@ -82,42 +139,142 @@ p.note { color: var(--muted); font-size: 12.5px; }
   </aside>
   <main>
     <div id="toolbar">
-      <label>Color by <select id="mode"></select></label>
+      <span class="segm"><button class="btn on" id="vBundle" title="The decompressed stream: the main JavaScript and the files">Stream</button><button class="btn" id="vSource" title="The original sources of the main JavaScript, from its source map">Sources</button></span>
+      <label>Color <select id="mode"></select></label>
+      <label title="Dim bytes that cost less than this many bits">Dim &lt; <input type="range" id="dim" min="0" max="8" step="0.5" value="0"><span id="dimv">off</span></label>
+      <label><input type="search" id="find" placeholder="Find  ( / )"><span id="findn"></span></label>
+      <span class="segm"><button class="btn" id="fprev" title="Previous match (Shift+Enter)">↑</button><button class="btn" id="fnext" title="Next match (Enter)">↓</button></span>
+      <span class="segm"><button class="btn" id="collapseAll" title="Collapse all files">Collapse</button><button class="btn" id="expandAll" title="Expand all files">Expand</button></span>
+      <span id="focus">Only <code></code><button title="Show everything again">×</button></span>
+    </div>
+    <div id="viewport">
+      <div id="content"></div>
+      <div id="srcview"></div>
+      <canvas id="mini" title="The whole stream; click or drag to jump"></canvas>
       <div id="legend"></div>
     </div>
-    <div id="sections"></div>
   </main>
 </div>
 <div id="tip"></div>
 <script>
+"use strict";
 const DATA = /*REPORT_DATA*/null;
 const S = DATA.summary;
-const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-const input = b64(DATA.input);
-const u16 = s => { const b = b64(s); return new Uint16Array(b.buffer, b.byteOffset, b.length / 2); };
-const costs16 = u16(DATA.costs), modelCosts16 = u16(DATA.modelCosts);
-const cost = o => costs16[o] / 256;
-const names = S.models.names, M = names.length;
-const modelCost = (o, j) => modelCosts16[o * M + j] / 256;
-const sections = S.sections;
-const sourcePos = (() => { if (!DATA.sourcePos) return null; const b = b64(DATA.sourcePos); return new Int32Array(b.buffer, b.byteOffset, b.length / 4); })();
-const sourceOf = o => sourcePos && 2 * o < sourcePos.length && sourcePos[2 * o] >= 0 ? `${DATA.sourcePaths[sourcePos[2 * o]]}:${sourcePos[2 * o + 1]}` : null;
-const nameOf = s => s.label || s.path;
-const fmt = (v, d = 1) => Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const fmt = (v, d = 1) => Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+function b64(s) {
+  const bin = atob(s), out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
-// Color scales: sequential for costs (0 to 8+ bits), diverging for differences (-8 to +8 bits).
+// ---------------------------------------------------------------- data
+const input = b64(DATA.input), N = input.length;
+const costs16 = new Uint16Array(b64(DATA.costs).buffer);
+const cost = o => costs16[o] / 256;
+const cum = new Float64Array(N + 1);
+for (let o = 0; o < N; o++) cum[o + 1] = cum[o] + costs16[o] / 256;
+const bitsIn = (a, b) => cum[b] - cum[a];
+const names = S.models.names, M = names.length;
+const modelCosts8 = b64(DATA.modelCosts);
+const modelCost = (o, j) => modelCosts8[o * M + j] / 16;
+const encodedPos = (() => { const s = b64(DATA.encodedSteps), p = new Uint32Array(N); let a = 0; for (let o = 0; o < N; o++) p[o] = a += s[o]; return p; })();
+const sections = S.sections;
+const nameOf = s => s.label || s.path;
+const mainEnd = sections.length ? sections[0].end : 0;
+const NONE = 0xffffffff;
+const runs = DATA.sourceRuns ? new Uint32Array(b64(DATA.sourceRuns).buffer) : new Uint32Array(0);
+const R = runs.length / 4;
+const sources = DATA.sources;
+const hasSources = sources.length > 0;
+function runIndex(o) {
+  let lo = 0, hi = R - 1;
+  if (!R || o >= mainEnd || runs[0] > o) return -1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (runs[4 * mid] <= o) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+function sourceAt(o) {
+  const i = runIndex(o);
+  if (i < 0 || runs[4 * i + 1] === NONE) return null;
+  return { source: runs[4 * i + 1], line: runs[4 * i + 2], column: runs[4 * i + 3] };
+}
+const sourceLinesCache = new Map();
+function sourceLines(si) {
+  if (!sourceLinesCache.has(si)) sourceLinesCache.set(si, sources[si].content == null ? null : sources[si].content.split("\n"));
+  return sourceLinesCache.get(si);
+}
+const lineStartsCache = new Map();
+function lineStarts(si) {
+  if (!lineStartsCache.has(si)) {
+    const s = sections[si];
+    if (!s.text) lineStartsCache.set(si, null);
+    else { const st = [s.start]; for (let o = s.start; o < s.end - 1; o++) if (input[o] === 10) st.push(o + 1); lineStartsCache.set(si, Uint32Array.from(st)); }
+  }
+  return lineStartsCache.get(si);
+}
+function sectionOf(o) { let i = sections.findIndex(s => o < s.end); return i < 0 ? sections.length - 1 : i; }
+function lineCol(si, o) {
+  const st = lineStarts(si);
+  if (!st) return null;
+  let lo = 0, hi = st.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (st[mid] <= o) lo = mid; else hi = mid - 1; }
+  return [lo + 1, o - st[lo] + 1];
+}
+const utf8Len = b => b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1;
+
+// Totals per original source, from the runs.
+const srcTotals = sources.map(() => ({ bytes: 0, bits: 0, first: -1 }));
+const unmapped = { bytes: 0, bits: 0, first: -1 };
+for (let i = 0; i < R; i++) {
+  const a = runs[4 * i], b = i + 1 < R ? runs[4 * i + 4] : mainEnd, src = runs[4 * i + 1];
+  const t = src === NONE ? unmapped : srcTotals[src];
+  t.bytes += b - a; t.bits += bitsIn(a, b); if (t.first < 0) t.first = a;
+}
+
+// ---------------------------------------------------------------- state
+const state = { mode: 0, dim: 0, focus: null, view: "stream", source: -1 };
+// focus: null, or { source: index } / { unmapped: true }
+
+// Color modes and classes. Sequential: 0 to 8+ bits; diverging: -8 to +8 bits.
+const modes = [{ label: "cost of each byte", value: o => cost(o), diverging: false }];
+for (let j = 0; j < M; j++) modes.push({ label: `m${j} alone: ${names[j]}`, value: o => modelCost(o, j), diverging: false });
+for (let j = 0; j < M; j++) modes.push({ label: `m${j} alone − actual: ${names[j]}`, value: o => modelCost(o, j) - cost(o), diverging: true });
+$("mode").innerHTML = modes.map((m, i) => `<option value="${i}">${esc(m.label)}</option>`).join("");
+const seqHue = k => 125 - k * 7.8;
 const style = document.createElement("style");
 let css = "";
-for (let k = 1; k <= 16; k++) css += `.c${k}{background:hsla(${125 - k * 7.8},85%,48%,${0.12 + k * 0.045})}`;
-for (let k = 0; k <= 16; k++) {
-  if (k === 8) continue;
-  const t = Math.abs(k - 8) / 8, hue = k < 8 ? 210 : 10;
-  css += `.d${k}{background:hsla(${hue},85%,50%,${0.1 + t * 0.6})}`;
-}
+for (let k = 1; k <= 16; k++) css += `.c${k}{background:hsla(${seqHue(k)},85%,48%,${0.12 + k * 0.045})}`;
+for (let k = 0; k <= 16; k++) { if (k === 8) continue; const t = Math.abs(k - 8) / 8; css += `.d${k}{background:hsla(${k < 8 ? 210 : 10},85%,50%,${0.1 + t * 0.6})}`; }
 style.textContent = css;
 document.head.appendChild(style);
+const mode = () => modes[state.mode];
+function bucketClass(v) {
+  if (mode().diverging) { const k = Math.max(0, Math.min(16, Math.round(v) + 8)); return k === 8 ? "" : "d" + k; }
+  const k = Math.min(16, Math.floor(v * 2));
+  return k > 0 ? "c" + k : "";
+}
+function isFocused(o) {
+  const f = state.focus;
+  if (!f) return true;
+  if (o >= mainEnd) return false;
+  const p = sourceAt(o);
+  return f.unmapped ? !p : !!p && p.source === f.source;
+}
+// Class of n bytes at o, with dimming.
+function classAt(o, n) {
+  const m = mode();
+  let v = 0, c = 0;
+  for (let k = 0; k < n; k++) { v += m.value(o + k); c += cost(o + k); }
+  if ((state.dim > 0 && c / n < state.dim) || !isFocused(o)) return "dim";
+  return bucketClass(v);
+}
+function legend() {
+  const d = mode().diverging;
+  const ks = d ? [...Array(17).keys()].filter(k => k !== 8) : [...Array(17).keys()].slice(1);
+  const unit = state.view === "source" ? "bits per character" : "bits";
+  $("legend").innerHTML = `<span>${d ? "−8 bits (model better)" : "0"}</span><div class="bar">${ks.map(k => `<span class="${d ? "d" : "c"}${k}"></span>`).join("")}</div><span>${d ? "+8 (model worse)" : "8+ " + unit}</span>`;
+}
 
 $("totals").innerHTML = [
   `<b>${S.totals.input_bytes.toLocaleString()}</b> bytes in`,
@@ -127,148 +284,610 @@ $("totals").innerHTML = [
   `output <b>${S.totals.output_bytes.toLocaleString()}</b> bytes`,
 ].filter(Boolean).join(" · ");
 
-// Color modes.
-const modes = [{ label: "cost of each byte", value: o => cost(o), diverging: false }];
-for (let j = 0; j < M; j++) modes.push({ label: `m${j} alone: ${names[j]}`, value: o => modelCost(o, j), diverging: false });
-for (let j = 0; j < M; j++) modes.push({ label: `m${j} alone minus actual: ${names[j]}`, value: o => modelCost(o, j) - cost(o), diverging: true });
-$("mode").innerHTML = modes.map((m, i) => `<option value="${i}">${esc(m.label)}</option>`).join("");
-let mode = modes[0];
-function cls(v) {
-  if (mode.diverging) return "d" + Math.max(0, Math.min(16, Math.round(v) + 8));
-  const k = Math.min(16, Math.floor(v * 2));
-  return k > 0 ? "c" + k : "";
-}
-function legend() {
-  const ks = mode.diverging ? [...Array(17).keys()] : [...Array(17).keys()].slice(1);
-  $("legend").innerHTML = `<span>${mode.diverging ? "−8 bits (model better)" : "0 bits"}</span><div class="bar">${ks.map(k => `<span class="${mode.diverging ? "d" : "c"}${k}"></span>`).join("")}</div><span>${mode.diverging ? "+8 bits (model worse)" : "8+ bits"}</span>`;
-}
+// ---------------------------------------------------------------- highlights (CSS Custom Highlight API)
+const HL = (window.Highlight && CSS.highlights) ? { sel: new Highlight(), find: new Highlight(), cur: new Highlight(), hover: new Highlight() } : null;
+if (HL) for (const k in HL) CSS.highlights.set(k, HL[k]);
+const marks = { sel: null, hover: null };      // [start, end) byte ranges
+const find = { matches: [], cur: -1, len: 0 };
 
-// Content. Every element covers one byte or one UTF-8 character: el.o is its offset, el.n its length.
-const spanAt = new Array(input.length);
-const els = [];
-const lineStarts = sections.map(s => {
-  if (!s.text) return null;
-  const st = [s.start];
-  for (let o = s.start; o < s.end - 1; o++) if (input[o] === 10) st.push(o + 1);
-  return st;
-});
-function sectionOf(o) { return sections.findIndex(s => o < s.end); }
-function lineCol(si, o) {
-  const st = lineStarts[si];
-  if (!st) return null;
-  let lo = 0, hi = st.length - 1;
-  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (st[mid] <= o) lo = mid; else hi = mid - 1; }
-  return [lo + 1, o - st[lo] + 1];
-}
+// ---------------------------------------------------------------- stream view: chunks rendered when near the screen
+const content = $("content");
+const CHUNK = 6144, HEX_ROW = 32;
 const dec = new TextDecoder();
-function makeSpan(o, n, text) {
-  const el = document.createElement("span");
-  el.o = o; el.n = n;
-  if (text === "\n") { el.className = "nl"; el.textContent = "\n"; }
-  else el.textContent = text;
-  for (let k = 0; k < n; k++) spanAt[o + k] = el;
-  els.push(el);
-  return el;
-}
-function renderSection(si, container) {
-  const s = sections[si];
-  const frag = document.createDocumentFragment();
-  if (s.text) {
-    const pre = document.createElement("pre");
-    pre.className = "text";
-    let o = s.start;
-    while (o < s.end) {
-      const b = input[o];
-      const n = b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : 2;
-      pre.appendChild(makeSpan(o, n, dec.decode(input.subarray(o, o + n))));
-      o += n;
+const metrics = (() => {
+  const probe = document.createElement("div");
+  probe.className = "chunk";
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+  probe.textContent = "0".repeat(100);
+  document.body.appendChild(probe);
+  const charW = probe.getBoundingClientRect().width / 100, lineH = probe.getBoundingClientRect().height;
+  probe.className = "hex"; const hexH = probe.getBoundingClientRect().height;
+  probe.remove();
+  return { charW, lineH, hexH };
+})();
+const chunks = [];
+const secEls = [];
+function buildChunks() {
+  sections.forEach((s, si) => {
+    const el = document.createElement("section");
+    el.className = "sec";
+    el.innerHTML = `<header><span class="arrow">▾</span><b>${esc(nameOf(s))}</b><small>${s.label ? esc(s.path) + " · " : ""}${s.kind} · ${s.text ? "text" : "binary"} · ${s.length.toLocaleString()} bytes · ${fmt(s.cost_bytes)} bytes of cost · ${fmt(s.bits_per_byte, 3)} bits/byte · offset ${s.start}</small></header><div class="body"></div>`;
+    el.querySelector("header").onclick = () => toggleSection(si);
+    content.appendChild(el);
+    secEls.push(el);
+    const body = el.querySelector(".body");
+    let a = s.start;
+    while (a < s.end) {
+      let b;
+      if (s.text) {
+        b = Math.min(s.end, a + CHUNK);
+        if (b < s.end) {
+          let nl = b - 1;
+          while (nl > a + CHUNK / 4 && input[nl] !== 10) nl--;
+          if (input[nl] === 10) b = nl + 1;
+          else while (b < s.end && (input[b] & 0xc0) === 0x80) b++;
+        }
+      } else {
+        b = Math.min(s.end, a + Math.floor(CHUNK / HEX_ROW) * HEX_ROW);
+      }
+      const ch = { si, start: a, end: b, text: s.text, rendered: false, near: false, spans: null, os: null, ranges: [] };
+      ch.el = document.createElement("div");
+      ch.el.className = s.text ? "chunk" + (a > s.start && input[a - 1] !== 10 ? " cont" : "") : "chunk hex";
+      ch.el.ch = ch;
+      body.appendChild(ch.el);
+      chunks.push(ch);
+      a = b;
     }
-    frag.appendChild(pre);
-  } else {
-    const hex = document.createElement("div");
-    hex.className = "hex";
-    for (let r = s.start; r < s.end; r += 32) {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = `<span class="addr">${(r - s.start).toString(16)}</span>`;
-      const bytes = document.createElement("span");
-      bytes.className = "bytes";
-      for (let o = r; o < Math.min(r + 32, s.end); o++) bytes.appendChild(makeSpan(o, 1, input[o].toString(16).padStart(2, "0")));
-      row.appendChild(bytes);
-      hex.appendChild(row);
+  });
+  estimateHeights();
+}
+function estimateHeights() {
+  const width = content.clientWidth - 32;
+  const perRow = Math.max(20, Math.floor(width / metrics.charW));
+  for (const ch of chunks) {
+    if (ch.rendered) continue;
+    if (!ch.text) { ch.el.style.height = Math.ceil((ch.end - ch.start) / HEX_ROW) * metrics.hexH + "px"; continue; }
+    let rows = 0, len = 0;
+    for (let o = ch.start; o < ch.end; o++) { if (input[o] === 10) { rows += Math.max(1, Math.ceil((len + 1) / perRow)); len = 0; } else if ((input[o] & 0xc0) !== 0x80) len++; }
+    if (len) rows += Math.ceil(len / perRow);
+    ch.el.style.height = Math.max(1, rows) * metrics.lineH + "px";
+  }
+}
+function textHtml(ch) {
+  let html = "", runCls = null, runStart = 0, runText = "";
+  const flush = () => { if (runText) html += `<span class="${runCls}" data-o="${runStart}">${runText}</span>`; runText = ""; };
+  for (let o = ch.start; o < ch.end;) {
+    const b = input[o];
+    if (b === 10) { flush(); html += `<span class="nl ${classAt(o, 1)}" data-o="${o}">\n</span>`; o++; continue; }
+    let n = 1, t;
+    if (b < 0x80) t = b === 38 ? "&amp;" : b === 60 ? "&lt;" : b === 62 ? "&gt;" : String.fromCharCode(b);
+    else { n = Math.min(utf8Len(b), ch.end - o); t = esc(dec.decode(input.subarray(o, o + n))); }
+    const cls = classAt(o, n);
+    if (cls !== runCls || !runText) { flush(); runCls = cls; runStart = o; }
+    runText += t;
+    o += n;
+  }
+  flush();
+  return html;
+}
+const HEX = [...Array(256).keys()].map(b => b.toString(16).padStart(2, "0") + " ");
+function hexHtml(ch) {
+  const base = sections[ch.si].start;
+  let html = "";
+  for (let r = ch.start; r < ch.end; r += HEX_ROW) {
+    const e = Math.min(r + HEX_ROW, ch.end);
+    html += `<div class="row"><span class="addr">${(r - base).toString(16).padStart(6, "0")}</span><span>`;
+    let runCls = null, runStart = r, runText = "";
+    for (let o = r; o < e; o++) {
+      const cls = classAt(o, 1);
+      if (cls !== runCls && runText) { html += `<span class="${runCls}" data-o="${runStart}" data-w="3">${runText}</span>`; runText = ""; }
+      if (!runText) { runCls = cls; runStart = o; }
+      runText += HEX[input[o]];
     }
-    frag.appendChild(hex);
+    if (runText) html += `<span class="${runCls}" data-o="${runStart}" data-w="3">${runText}</span>`;
+    let asc = "";
+    for (let o = r; o < e; o++) { const b = input[o]; asc += b >= 32 && b < 127 ? (b === 38 ? "&amp;" : b === 60 ? "&lt;" : b === 62 ? "&gt;" : String.fromCharCode(b)) : "."; }
+    html += `</span><span class="a" data-o="${r}" data-w="1">${asc}</span></div>`;
   }
-  container.appendChild(frag);
+  return html;
 }
-const root = $("sections");
-sections.forEach((s, si) => {
-  const d = document.createElement("details");
-  d.open = true;
-  d.id = "sec" + si;
-  d.innerHTML = `<summary>${esc(nameOf(s))}<small>${s.label ? esc(s.path) + " · " : ""}${s.kind} · ${s.text ? "text" : "binary"} · ${s.length.toLocaleString()} bytes · ${fmt(s.cost_bytes)} bytes of cost · ${fmt(s.bits_per_byte, 3)} bits/byte · offset ${s.start}</small></summary>`;
-  root.appendChild(d);
-  renderSection(si, d);
-});
-function valueOf(el) { let v = 0; for (let k = 0; k < el.n; k++) v += mode.value(el.o + k); return v; }
-function paint() {
-  for (const el of els) {
-    const c = cls(valueOf(el));
-    el.className = (el.className.includes("nl") ? "nl " : "") + (el.className.includes("hl") ? "hl " : "") + c;
+let renderedCount = 0;
+function render(ch) {
+  clearRanges(ch);
+  ch.el.innerHTML = ch.text ? textHtml(ch) : hexHtml(ch);
+  ch.el.style.height = "";
+  if (!ch.rendered) renderedCount++;
+  ch.rendered = true;
+  ch.spans = Array.from(ch.el.querySelectorAll("span[data-o]")).filter(s => !s.classList.contains("a"));
+  ch.os = Uint32Array.from(ch.spans, s => +s.dataset.o);
+  applyRanges(ch);
+}
+function unrender(ch) {
+  clearRanges(ch);
+  ch.el.style.height = ch.el.offsetHeight + "px";
+  ch.el.innerHTML = "";
+  ch.rendered = false; ch.spans = ch.os = null;
+  renderedCount--;
+}
+function rerenderAll() {
+  for (const ch of chunks) if (ch.rendered) render(ch);
+  drawMini();
+}
+const observer = new IntersectionObserver(entries => {
+  for (const e of entries) {
+    const ch = e.target.ch;
+    ch.near = e.isIntersecting;
+    if (ch.near && !ch.rendered) render(ch);
   }
-  legend();
-}
-$("mode").onchange = e => { mode = modes[+e.target.value]; paint(); };
-paint();
+  if (renderedCount > 60) for (const ch of chunks) if (ch.rendered && !ch.near) unrender(ch);
+}, { root: content, rootMargin: "1500px 0px" });
 
-// Tooltip.
+function toggleSection(si, open) {
+  const el = secEls[si];
+  const closed = open === undefined ? !el.classList.contains("closed") : !open;
+  el.classList.toggle("closed", closed);
+  drawMini();
+}
+$("collapseAll").onclick = () => sections.forEach((_, i) => toggleSection(i, false));
+$("expandAll").onclick = () => sections.forEach((_, i) => toggleSection(i, true));
+
+// Byte offset <-> text position in a rendered chunk.
+function chunkOf(o) {
+  let lo = 0, hi = chunks.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (chunks[mid].start <= o) lo = mid; else hi = mid - 1; }
+  return chunks[lo];
+}
+function byteInSpan(span, k) {
+  const o = +span.dataset.o, w = +span.dataset.w;
+  if (w) return o + Math.floor(k / w);
+  const t = span.firstChild ? span.firstChild.data : "";
+  let b = o;
+  for (let i = 0; i < k && i < t.length;) { const cp = t.codePointAt(i); b += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4; i += cp > 0xffff ? 2 : 1; }
+  return b;
+}
+function locate(ch, o) {
+  // Text node and offset of byte o in a rendered chunk; o may be ch.end.
+  const os = ch.os;
+  if (!os.length) return null;
+  let lo = 0, hi = os.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (os[mid] <= o) lo = mid; else hi = mid - 1; }
+  const span = ch.spans[lo], node = span.firstChild;
+  if (!node) return null;
+  const w = +span.dataset.w;
+  if (w) return { node, offset: Math.min(node.data.length, (o - os[lo]) * w) };
+  let b = os[lo], i = 0;
+  const t = node.data;
+  while (b < o && i < t.length) { const cp = t.codePointAt(i); b += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4; i += cp > 0xffff ? 2 : 1; }
+  return { node, offset: i };
+}
+function rangeIn(ch, a, b) {
+  a = Math.max(a, ch.start); b = Math.min(b, ch.end);
+  if (a >= b) return null;
+  const s = locate(ch, a), e = locate(ch, b);
+  if (!s || !e) return null;
+  const r = new Range();
+  r.setStart(s.node, s.offset);
+  if (b >= ch.end) { const last = ch.spans[ch.spans.length - 1].firstChild; r.setEnd(last, last.data.length); }
+  else r.setEnd(e.node, e.offset);
+  return r;
+}
+function clearRanges(ch) {
+  if (!HL) return;
+  for (const [h, r] of ch.ranges) HL[h].delete(r);
+  ch.ranges = [];
+}
+function addRange(ch, h, a, b) {
+  const r = rangeIn(ch, a, b);
+  if (r) { HL[h].add(r); ch.ranges.push([h, r]); }
+}
+function applyRanges(ch) {
+  if (!HL || !ch.rendered) return;
+  if (marks.sel) addRange(ch, "sel", marks.sel[0], marks.sel[1]);
+  if (marks.hover) addRange(ch, "hover", marks.hover[0], marks.hover[1]);
+  const m = find.matches;
+  if (m.length) {
+    let lo = 0, hi = m.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (m[mid] + find.len <= ch.start) lo = mid + 1; else hi = mid; }
+    for (let i = lo; i < m.length && m[i] < ch.end; i++) addRange(ch, i === find.cur ? "cur" : "find", m[i], m[i] + find.len);
+  }
+}
+function refreshRanges(a, b) {
+  for (const ch of chunks) if (ch.rendered && ch.end > a && ch.start < b) { clearRanges(ch); applyRanges(ch); }
+}
+function setMark(kind, range) {
+  const old = marks[kind];
+  marks[kind] = range;
+  for (const r of [old, range]) if (r) refreshRanges(r[0], r[1]);
+}
+
+function goTo(a, b = a + 1) {
+  if (state.view !== "stream") setView("stream");
+  const ch = chunkOf(a);
+  toggleSection(ch.si, true);
+  if (!ch.rendered) render(ch);
+  setMark("sel", [a, b]);
+  const loc = locate(ch, a);
+  const r = loc && new Range();
+  if (r) {
+    r.setStart(loc.node, loc.offset);
+    const rect = r.getBoundingClientRect(), box = content.getBoundingClientRect();
+    content.scrollTop += rect.top - box.top - box.height / 2;
+  } else ch.el.scrollIntoView({ block: "center" });
+}
+
+// ---------------------------------------------------------------- tooltip
 const tip = $("tip");
 let pinned = false;
-function showTip(el, x, y) {
-  const o = el.o, si = sectionOf(o), s = sections[si];
-  let c = 0; for (let k = 0; k < el.n; k++) c += cost(o + k);
-  const lc = lineCol(si, o);
-  const bytes = Array.from(input.subarray(o, o + el.n), b => b.toString(16).padStart(2, "0")).join(" ");
-  let h = `<div><b>${esc(nameOf(s))}</b>${lc ? ` line ${lc[0]}, column ${lc[1]}` : ""}</div>`;
-  const src = sourceOf(o);
-  if (src) h += `<div>from <b>${esc(src)}</b></div>`;
-  h += `<div>offset ${o} (section +${o - s.start}) · bytes ${bytes}</div>`;
-  h += `<div><b>${fmt(c, 2)}</b> bits · stream position ≈ ${o ? DATA.encodedPos[o - 1] : 0}</div>`;
-  if (M) {
-    const mc = names.map((_, j) => { let v = 0; for (let k = 0; k < el.n; k++) v += modelCost(o + k, j); return [j, v]; }).sort((a, b) => a[1] - b[1]);
-    const max = Math.max(8, ...mc.map(x => x[1]));
-    h += `<div class="m">` + mc.map(([j, v], i) => `<span class="${i ? "" : "best"}" title="${esc(names[j])}">m${j} ${esc(names[j].replace(/^model\./, "").slice(0, 34))}</span><span class="num">${fmt(v, 2)}</span><div class="b" style="width:${(v / max) * 60}px"></div>`).join("") + `</div>`;
+function caretAt(x, y) {
+  if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(x, y); return p && { node: p.offsetNode, offset: p.offset }; }
+  const r = document.caretRangeFromPoint && document.caretRangeFromPoint(x, y);
+  return r && { node: r.startContainer, offset: r.startOffset };
+}
+function byteAtPoint(x, y) {
+  const c = caretAt(x, y);
+  if (!c || c.node.nodeType !== 3) return null;
+  const span = c.node.parentElement;
+  if (!span || span.dataset.o === undefined) return null;
+  let k = c.offset;
+  // The caret is between characters: take the character under the pointer.
+  if (k > 0) {
+    const r = new Range(); r.setStart(c.node, k - 1); r.setEnd(c.node, k);
+    const rect = r.getBoundingClientRect();
+    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) k--;
   }
-  h += `<div style="color:var(--muted);margin-top:4px">rootsqz report &lt;dir&gt; --view bits --range ${o}..${o + el.n}${M ? " --models" : ""}</div>`;
-  tip.innerHTML = h;
+  if (k >= c.node.data.length) return null;
+  const o = byteInSpan(span, k);
+  if (span.classList.contains("nl")) return { o, n: 1 };
+  return { o, n: span.dataset.w ? 1 : utf8Len(input[o]) };
+}
+function srcLineText(p) {
+  const lines = sourceLines(p.source);
+  return lines && lines[p.line - 1] != null ? lines[p.line - 1] : null;
+}
+function showTip(html, x, y) {
+  tip.innerHTML = html;
   tip.style.display = "block";
   const r = tip.getBoundingClientRect();
   tip.style.left = Math.max(8, Math.min(x + 14, innerWidth - r.width - 8)) + "px";
   tip.style.top = (y + 18 + r.height > innerHeight ? y - r.height - 10 : y + 18) + "px";
 }
-root.addEventListener("mousemove", e => { if (!pinned && e.target.o !== undefined) showTip(e.target, e.clientX, e.clientY); });
-root.addEventListener("mouseleave", () => { if (!pinned) tip.style.display = "none"; });
-root.addEventListener("click", e => {
-  if (e.target.o === undefined) { pinned = false; tip.classList.remove("pinned"); tip.style.display = "none"; return; }
-  pinned = !pinned; tip.classList.toggle("pinned", pinned); showTip(e.target, e.clientX, e.clientY);
+function byteTip(o, n) {
+  const si = sectionOf(o), s = sections[si];
+  const c = bitsIn(o, o + n), lc = lineCol(si, o);
+  const bytes = Array.from(input.subarray(o, o + n), b => b.toString(16).padStart(2, "0")).join(" ");
+  let h = `<div><b>${esc(nameOf(s))}</b>${lc ? ` line ${lc[0]}, column ${lc[1]}` : ""}</div>`;
+  h += `<div>offset ${o} (+${o - s.start} in the file) · bytes ${bytes}</div>`;
+  h += `<div><b>${fmt(c, 2)}</b> bits · compressed stream at ≈ ${o ? encodedPos[o - 1] : 0}</div>`;
+  const p = sourceAt(o);
+  if (p) {
+    const t = srcLineText(p);
+    h += `<div>from <b>${esc(sources[p.source].path)}:${p.line}</b></div>`;
+    if (t != null) h += `<pre>${esc(t.trim().slice(0, 300))}</pre>`;
+  } else if (o < mainEnd && hasSources) h += `<div style="color:var(--muted)">not mapped by the source map</div>`;
+  if (M) {
+    const mc = names.map((_, j) => { let v = 0; for (let k = 0; k < n; k++) v += modelCost(o + k, j); return [j, v]; }).sort((a, b) => a[1] - b[1]);
+    const max = Math.max(8, ...mc.map(x => x[1]));
+    h += `<div class="m">` + mc.map(([j, v], i) => `<span class="${i ? "" : "best"}" title="${esc(names[j])}">m${j} ${esc(names[j].replace(/^model\./, "").slice(0, 34))}</span><span class="num">${fmt(v, 2)}</span><div class="b" style="width:${(v / max) * 60}px"></div>`).join("") + `</div>`;
+  }
+  h += `<div class="hint">rootsqz report &lt;dir&gt; --view bits --range ${o}..${o + n}${M ? " --models" : ""}</div>`;
+  if (p && !pinned) h += `<div class="hint">click to pin · double-click to open the source</div>`;
+  return h;
+}
+let pending = null;
+content.addEventListener("mousemove", e => {
+  if (pinned) return;
+  pending = [e.clientX, e.clientY];
+  requestAnimationFrame(() => {
+    if (!pending) return;
+    const [x, y] = pending; pending = null;
+    const hit = byteAtPoint(x, y);
+    if (!hit) { tip.style.display = "none"; setMark("hover", null); return; }
+    setMark("hover", [hit.o, hit.o + hit.n]);
+    showTip(byteTip(hit.o, hit.n), x, y);
+  });
+});
+content.addEventListener("mouseleave", () => { if (!pinned) { tip.style.display = "none"; setMark("hover", null); } });
+content.addEventListener("click", e => {
+  const hit = byteAtPoint(e.clientX, e.clientY);
+  if (!hit) { unpin(); return; }
+  pinned = !pinned;
+  tip.classList.toggle("pinned", pinned);
+  setMark("hover", [hit.o, hit.o + hit.n]);
+  showTip(byteTip(hit.o, hit.n), e.clientX, e.clientY);
+});
+content.addEventListener("dblclick", e => {
+  const hit = byteAtPoint(e.clientX, e.clientY);
+  const p = hit && sourceAt(hit.o);
+  if (p) { unpin(); openSource(p.source, p.line); }
+});
+function unpin() { pinned = false; tip.classList.remove("pinned"); tip.style.display = "none"; setMark("hover", null); }
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") { unpin(); setMark("sel", null); }
+  if (e.key === "/" && document.activeElement !== $("find")) { e.preventDefault(); $("find").focus(); $("find").select(); }
 });
 
-let highlighted = [];
-function goTo(start, end) {
-  for (const el of highlighted) el.classList.remove("hl");
-  highlighted = [];
-  const seen = new Set();
-  for (let o = start; o < Math.min(end, input.length); o++) {
-    const el = spanAt[o];
-    if (el && !seen.has(el)) { seen.add(el); el.classList.add("hl"); highlighted.push(el); }
+// ---------------------------------------------------------------- find
+let latin = null;
+function runFind() {
+  const q = $("find").value;
+  find.matches = []; find.cur = -1;
+  if (q) {
+    if (latin === null) { latin = ""; for (let i = 0; i < N; i += 8192) latin += String.fromCharCode.apply(null, input.subarray(i, i + 8192)); }
+    const qb = String.fromCharCode(...new TextEncoder().encode(q));
+    find.len = qb.length;
+    for (let i = latin.indexOf(qb); i >= 0 && find.matches.length < 100000; i = latin.indexOf(qb, i + 1)) find.matches.push(i);
   }
-  if (highlighted[0]) {
-    highlighted[0].closest("details").open = true;
-    highlighted[0].scrollIntoView({ block: "center", behavior: "smooth" });
+  for (const ch of chunks) if (ch.rendered) { clearRanges(ch); applyRanges(ch); }
+  $("findn").textContent = q ? (find.matches.length ? `${find.matches.length.toLocaleString()}` : "0") : "";
+  drawMini();
+}
+function stepFind(d) {
+  if (!find.matches.length) return;
+  const old = find.cur;
+  if (old < 0) {
+    // Start at the first match after the top of the screen.
+    const top = visibleRange()[0];
+    let i = find.matches.findIndex(m => m >= top);
+    find.cur = d > 0 ? (i < 0 ? 0 : i) : (i <= 0 ? find.matches.length - 1 : i - 1);
+  } else find.cur = (old + d + find.matches.length) % find.matches.length;
+  $("findn").textContent = `${find.cur + 1} / ${find.matches.length.toLocaleString()}`;
+  const m = find.matches[find.cur];
+  if (old >= 0) refreshRanges(find.matches[old], find.matches[old] + find.len);
+  goTo(m, m + find.len);
+  setMark("sel", null);
+  refreshRanges(m, m + find.len);
+  drawMini();
+}
+let findTimer = 0;
+$("find").addEventListener("input", () => { clearTimeout(findTimer); findTimer = setTimeout(runFind, 200); });
+$("find").addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(findTimer); if (find.matches.length === 0) runFind(); stepFind(e.shiftKey ? -1 : 1); } });
+$("fnext").onclick = () => stepFind(1);
+$("fprev").onclick = () => stepFind(-1);
+
+// ---------------------------------------------------------------- minimap
+const mini = $("mini");
+function visibleRange() {
+  const box = content.getBoundingClientRect();
+  let a = -1, b = -1;
+  for (const ch of chunks) {
+    if (secEls[ch.si].classList.contains("closed")) continue;
+    const r = ch.el.getBoundingClientRect();
+    if (r.bottom < box.top || r.height === 0) continue;
+    if (r.top > box.bottom) break;
+    const f0 = Math.max(0, (box.top - r.top) / r.height), f1 = Math.min(1, (box.bottom - r.top) / r.height);
+    const len = ch.end - ch.start;
+    if (a < 0) a = ch.start + Math.floor(f0 * len);
+    b = ch.start + Math.ceil(f1 * len);
+  }
+  return a < 0 ? [0, 0] : [a, b];
+}
+function colorOf(v, diverging) {
+  if (diverging) { const k = Math.max(-8, Math.min(8, v)); const t = Math.abs(k) / 8; return `hsla(${k < 0 ? 210 : 10},85%,50%,${0.15 + t * 0.85})`; }
+  const k = Math.min(16, v * 2);
+  return `hsl(${seqHue(k)},80%,${46 - k}%)`;
+}
+function drawMini() {
+  const dpr = devicePixelRatio || 1, w = mini.clientWidth, h = mini.clientHeight;
+  if (!w || !h) return;
+  mini.width = w * dpr; mini.height = h * dpr;
+  const g = mini.getContext("2d");
+  g.scale(dpr, dpr);
+  const cs = getComputedStyle(document.body);
+  g.fillStyle = cs.getPropertyValue("--panel"); g.fillRect(0, 0, w, h);
+  if (state.view === "source") return drawMiniSource(g, w, h);
+  const m = mode();
+  for (let y = 0; y < h; y++) {
+    const a = Math.floor(y * N / h), b = Math.max(a + 1, Math.floor((y + 1) * N / h));
+    let v, focused = 0;
+    if (state.mode === 0) v = bitsIn(a, b) / (b - a);
+    else { let s = 0, n = 0; const step = Math.max(1, Math.floor((b - a) / 64)); for (let o = a; o < b; o += step) { s += m.value(o); n++; } v = s / n; }
+    if (state.focus) { const step = Math.max(1, Math.floor((b - a) / 32)); for (let o = a; o < b; o += step) if (isFocused(o)) { focused = 1; break; } }
+    g.fillStyle = state.focus && !focused ? cs.getPropertyValue("--line") : colorOf(v, m.diverging);
+    g.fillRect(0, y, w - 4, 1);
+  }
+  g.fillStyle = cs.getPropertyValue("--fg");
+  for (const s of sections.slice(1)) g.fillRect(0, Math.round(s.start / N * h), w, 1);
+  if (find.matches.length) {
+    g.fillStyle = "#eab308";
+    let last = -1;
+    for (const mt of find.matches) { const y = Math.floor(mt / N * h); if (y !== last) { g.fillRect(w - 4, y, 4, 2); last = y; } }
+  }
+  const [va, vb] = visibleRange();
+  if (vb > va) {
+    g.strokeStyle = cs.getPropertyValue("--fg"); g.lineWidth = 1.5;
+    const y0 = va / N * h, y1 = Math.max(y0 + 3, vb / N * h);
+    g.strokeRect(0.75, y0, w - 1.5, y1 - y0);
   }
 }
+function miniJump(e) {
+  const r = mini.getBoundingClientRect(), f = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+  if (state.view === "source") { const sv = $("srcview"); sv.scrollTop = f * sv.scrollHeight - sv.clientHeight / 2; return; }
+  const o = Math.min(N - 1, Math.floor(f * N));
+  const ch = chunkOf(o);
+  toggleSection(ch.si, true);
+  const box = content.getBoundingClientRect(), cr = ch.el.getBoundingClientRect();
+  content.scrollTop += cr.top - box.top + (o - ch.start) / (ch.end - ch.start) * cr.height - box.height / 2;
+}
+let dragging = false;
+mini.addEventListener("mousedown", e => { dragging = true; miniJump(e); });
+addEventListener("mousemove", e => { if (dragging) miniJump(e); });
+addEventListener("mouseup", () => { dragging = false; });
+let miniQueued = false;
+function queueMini() { if (!miniQueued) { miniQueued = true; requestAnimationFrame(() => { miniQueued = false; drawMini(); }); } }
+content.addEventListener("scroll", queueMini);
+$("srcview").addEventListener("scroll", queueMini);
+new ResizeObserver(() => { estimateHeights(); queueMini(); }).observe(content);
 
-// Side panels.
+// ---------------------------------------------------------------- toolbar
+$("mode").onchange = e => { state.mode = +e.target.value; legend(); rerenderAll(); if (state.view === "source") renderSource(); };
+$("dim").oninput = e => { state.dim = +e.target.value; $("dimv").textContent = state.dim ? state.dim + " bits" : "off"; };
+$("dim").onchange = () => { rerenderAll(); if (state.view === "source") renderSource(); };
+function setFocus(f) {
+  state.focus = f;
+  const el = $("focus");
+  el.classList.toggle("on", !!f);
+  if (f) el.querySelector("code").textContent = f.unmapped ? "(not mapped)" : sources[f.source].path;
+  rerenderAll();
+  if (current === "Files") showPanel("Files");
+}
+$("focus").querySelector("button").onclick = () => setFocus(null);
+function setView(v) {
+  state.view = v;
+  document.body.classList.toggle("source", v === "source");
+  $("vBundle").classList.toggle("on", v === "stream");
+  $("vSource").classList.toggle("on", v === "source");
+  for (const id of ["find", "fprev", "fnext", "collapseAll", "expandAll"]) $(id).disabled = v === "source";
+  unpin();
+  legend();
+  if (v === "source" && state.source < 0) {
+    let best = 0; srcTotals.forEach((t, i) => { if (t.bits > srcTotals[best].bits) best = i; });
+    openSource(best);
+  }
+  if (current === "Files") markFile();
+  drawMini();
+}
+$("vBundle").onclick = () => setView("stream");
+$("vSource").onclick = () => setView("source");
+if (!hasSources) { $("vSource").disabled = true; $("vSource").title = "Compress with --report-source-map (the plugin does it) to see the original sources"; }
+
+// ---------------------------------------------------------------- source view
+// Per source line: bits, bytes, first generated byte, and the pieces of the line by source column.
+const srcAgg = new Map();
+function aggregate(si) {
+  if (srcAgg.has(si)) return srcAgg.get(si);
+  const lines = new Map();
+  const mainStarts = lineStarts(0);
+  const get = l => { let x = lines.get(l); if (!x) lines.set(l, x = { bits: 0, bytes: 0, first: -1, segs: new Map(), chars: null }); return x; };
+  for (let i = 0; i < R; i++) {
+    if (runs[4 * i + 1] !== si) continue;
+    const a = runs[4 * i], b = i + 1 < R ? runs[4 * i + 4] : mainEnd, line = runs[4 * i + 2], col = runs[4 * i + 3];
+    const x = get(line), bits = bitsIn(a, b);
+    x.bits += bits; x.bytes += b - a; if (x.first < 0 || a < x.first) x.first = a;
+    if (col === 0 && mainStarts) {
+      // The generated line is the same as the source line: same columns.
+      let lo = 0, hi = mainStarts.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (mainStarts[mid] <= a) lo = mid; else hi = mid - 1; }
+      const c0 = a - mainStarts[lo];
+      if (!x.chars) x.chars = [];
+      for (let o = a; o < b; o++) { if (input[o] === 10) continue; const c = c0 + o - a; x.chars[c] = (x.chars[c] || 0) + cost(o); }
+    } else {
+      const s = x.segs.get(col) || { bits: 0, bytes: 0, start: a, end: b };
+      s.bits += bits; s.bytes += b - a; s.end = Math.max(s.end, b);
+      x.segs.set(col, s);
+    }
+  }
+  srcAgg.set(si, lines);
+  return lines;
+}
+function renderSource(scrollLine) {
+  const si = state.source, sv = $("srcview");
+  if (si < 0) return;
+  pieceIndex.length = 0;
+  const src = sources[si], t = srcTotals[si], agg = aggregate(si);
+  const text = sourceLines(si);
+  let maxBits = 0;
+  for (const x of agg.values()) maxBits = Math.max(maxBits, x.bits);
+  let html = `<div class="head"><b>${esc(src.path)}</b><small>${t.bytes.toLocaleString()} bytes in the main JavaScript · ${fmt(t.bits / 8)} bytes of cost · ${fmt(t.bits / Math.max(1, t.bytes), 3)} bits/byte · ${fmt(100 * t.bits / cum[N], 1)}% of the stream</small><button class="btn" id="srcFocus">Show only this in the stream</button></div>`;
+  if (!text) {
+    html += `<p class="note">The source map has no content for this file. Its lines and their cost:</p>`;
+    for (const [l, x] of [...agg.entries()].sort((a, b) => a[0] - b[0])) html += `<div class="sl" data-l="${l}"><span class="ln">${l}</span><span class="lb">${fmt(x.bits, 0)}</span><span class="code">${x.bytes} bytes</span></div>`;
+  } else {
+    text.forEach((lineText, i) => {
+      const l = i + 1, x = agg.get(l);
+      const w = x ? Math.max(2, 100 * x.bits / maxBits) : 0;
+      html += `<div class="sl" data-l="${l}"><span class="ln">${l}</span><span class="lb" style="--w:${w}%">${x ? fmt(x.bits, 0) : ""}</span><span class="code">${sourceLineHtml(lineText, x, l, state.dim)}</span></div>`;
+    });
+  }
+  sv.innerHTML = html;
+  $("srcFocus").onclick = () => { setFocus({ source: si }); setView("stream"); goTo(t.first); };
+  if (scrollLine) {
+    const row = sv.querySelector(`.sl[data-l="${scrollLine}"]`);
+    if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 1200); }
+  } else sv.scrollTop = 0;
+  drawMini();
+}
+const pieceIndex = [];
+function sourceLineHtml(t, x, l, dimBelow) {
+  if (!x) return t ? `<span class="x">${esc(t)}</span>` : "";
+  const cls = v => (dimBelow && v < dimBelow) ? "dim" : bucketClass(v);
+  if (x.chars) {
+    let h = "", runCls = null, run = "";
+    for (let c = 0; c < t.length; c++) {
+      const v = x.chars[c];
+      const k = v === undefined ? "x" : cls(v);
+      if (k !== runCls && run) { h += `<span class="${runCls}" data-s="${pieceIndex.length}">${esc(run)}</span>`; pieceIndex.push({ l, x, c: c - run.length }); run = ""; }
+      runCls = k; run += t[c];
+    }
+    if (run) { h += `<span class="${runCls}" data-s="${pieceIndex.length}">${esc(run)}</span>`; pieceIndex.push({ l, x, c: t.length - run.length }); }
+    return h;
+  }
+  const cols = [...x.segs.keys()].sort((a, b) => a - b);
+  let h = "", pos = 0;
+  cols.forEach((col, i) => {
+    const c0 = Math.max(pos, Math.min(t.length, col - 1)), c1 = i + 1 < cols.length ? Math.min(t.length, cols[i + 1] - 1) : t.length;
+    if (c0 > pos) h += `<span class="x">${esc(t.slice(pos, c0))}</span>`;
+    const s = x.segs.get(col);
+    const piece = t.slice(c0, Math.max(c0, c1)) || (c0 >= t.length ? " " : "");
+    h += `<span class="${cls(s.bits / Math.max(1, piece.length))}" data-s="${pieceIndex.length}">${esc(piece)}</span>`;
+    pieceIndex.push({ l, x, seg: s, col });
+    pos = Math.max(pos, c1);
+  });
+  if (pos < t.length) h += `<span class="x">${esc(t.slice(pos))}</span>`;
+  return h;
+}
+function openSource(si, line) {
+  state.source = si;
+  if (state.view !== "source") setView("source");
+  renderSource(line);
+  if (current === "Files") markFile();
+}
+function drawMiniSource(g, w, h) {
+  const si = state.source;
+  if (si < 0) return;
+  const agg = aggregate(si), lines = sourceLines(si) || [], n = lines.length || Math.max(1, ...agg.keys());
+  for (let y = 0; y < h; y++) {
+    const a = Math.floor(y * n / h) + 1, b = Math.max(a + 1, Math.floor((y + 1) * n / h) + 1);
+    let bits = 0, chars = 0;
+    for (let l = a; l < b; l++) { const x = agg.get(l); if (x) { bits += x.bits; chars += Math.max(1, (lines[l - 1] || "").trim().length); } }
+    if (chars) { g.fillStyle = colorOf(bits / chars, false); g.fillRect(0, y, w, 1); }
+  }
+  const sv = $("srcview");
+  if (sv.scrollHeight > 0) {
+    g.strokeStyle = getComputedStyle(document.body).getPropertyValue("--fg"); g.lineWidth = 1.5;
+    const y0 = sv.scrollTop / sv.scrollHeight * h, y1 = (sv.scrollTop + sv.clientHeight) / sv.scrollHeight * h;
+    g.strokeRect(0.75, y0, w - 1.5, Math.max(3, y1 - y0));
+  }
+}
+const srcview = $("srcview");
+srcview.addEventListener("mousemove", e => {
+  const sp = e.target.closest("[data-s]"), row = e.target.closest(".sl");
+  if (!row || (!sp && !e.target.closest(".lb"))) { tip.style.display = "none"; return; }
+  const l = +row.dataset.l, x = aggregate(state.source).get(l);
+  if (!x) { tip.style.display = "none"; return; }
+  const p = sp ? pieceIndex[+sp.dataset.s] : null;
+  let h = `<div><b>${esc(sources[state.source].path)}:${l}</b></div><div>line: <b>${fmt(x.bits, 1)}</b> bits for ${x.bytes} bytes of the main JavaScript</div>`;
+  if (p && p.seg) {
+    const s = p.seg, gen = dec.decode(input.subarray(s.start, Math.min(s.end, s.start + 120)));
+    h += `<div>here: <b>${fmt(s.bits, 1)}</b> bits for ${s.bytes} bytes, generated as</div><pre>${esc(gen)}${s.end - s.start > 120 ? "…" : ""}</pre>`;
+  } else if (p && x.chars) {
+    const v = x.chars[p.c];
+    if (v !== undefined) h += `<div>copied as it is into the main JavaScript; ${fmt(v, 2)} bits for its first character here</div>`;
+  }
+  h += `<div class="hint">click to show it in the stream</div>`;
+  showTip(h, e.clientX, e.clientY);
+});
+srcview.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+srcview.addEventListener("click", e => {
+  const sp = e.target.closest("[data-s]"), row = e.target.closest(".sl");
+  if (!row) return;
+  const x = aggregate(state.source).get(+row.dataset.l);
+  if (!x) return;
+  const p = sp ? pieceIndex[+sp.dataset.s] : null;
+  if (p && p.seg) goTo(p.seg.start, p.seg.end);
+  else goTo(x.first, x.first + 1);
+});
+
+// ---------------------------------------------------------------- side panels
 function table(rows, cols, onClick) {
   const head = cols.map(c => `<th class="${c.num ? "num" : ""}">${esc(c.label)}</th>`).join("");
   const body = rows.map((r, i) => `<tr data-i="${i}" class="${onClick ? "click" : ""}">${cols.map(c => `<td class="${c.num ? "num" : ""}">${c.html ? c.html(r) : esc(c.get(r))}</td>`).join("")}</tr>`).join("");
@@ -279,52 +898,106 @@ function table(rows, cols, onClick) {
 }
 const num = (label, key, d = 1) => ({ label, num: true, get: r => r[key] == null ? "" : fmt(r[key], d) });
 const txt = (label, key) => ({ label, get: r => r[key] ?? "" });
-const code = (label, key) => ({ label, html: r => `<code>${esc(r[key])}</code>` });
+const code = (label, key) => ({ label, html: r => `<code>${esc(r[key] ?? "")}</code>` });
 const h2 = t => Object.assign(document.createElement("h2"), { textContent: t });
 const note = t => Object.assign(document.createElement("p"), { className: "note", textContent: t });
+function findText(t) { setView("stream"); $("find").value = t; runFind(); stepFind(1); }
+
+function filesPanel(p) {
+  p.appendChild(h2("Files in the stream"));
+  p.appendChild(note("The main JavaScript and each --file, in the order they are compressed. The model learns across them. Click to jump, or collapse them in the stream."));
+  p.appendChild(table(sections, [{ label: "file", html: r => `<code>${esc(nameOf(r))}</code>` }, num("bytes", "length", 0), num("cost", "cost_bytes"), num("bits/B", "bits_per_byte", 2)], r => goTo(r.start)));
+  if (!hasSources) {
+    p.appendChild(h2("Original sources"));
+    p.appendChild(note("Compress with --report-source-map to see the original sources of the main JavaScript. The plugin passes the source map by itself."));
+  } else {
+    p.appendChild(h2("Original sources of the main JavaScript"));
+    p.appendChild(note("Click a file to see its code colored by cost. ◎ shows only its bytes in the stream."));
+    const filter = Object.assign(document.createElement("input"), { type: "search", className: "filter", placeholder: "Filter files" });
+    p.appendChild(filter);
+    const tree = document.createElement("div");
+    tree.className = "files";
+    p.appendChild(tree);
+    const all = sources.map((s, i) => ({ i, path: s.path, ...srcTotals[i] })).filter(f => f.bytes > 0);
+    const total = cum[N];
+    const draw = () => {
+      const q = filter.value.toLowerCase();
+      const dirs = new Map();
+      for (const f of all) {
+        if (q && !f.path.toLowerCase().includes(q)) continue;
+        const cut = f.path.lastIndexOf("/"), dir = cut < 0 ? "." : f.path.slice(0, cut);
+        if (!dirs.has(dir)) dirs.set(dir, { files: [], bits: 0 });
+        const d = dirs.get(dir); d.files.push(f); d.bits += f.bits;
+      }
+      const maxBits = Math.max(1, ...all.map(f => f.bits));
+      let h = "";
+      for (const [dir, d] of [...dirs.entries()].sort((a, b) => b[1].bits - a[1].bits)) {
+        h += `<details open><summary><span>${esc(dir)}/</span><span>${fmt(d.bits / 8, 0)} B · ${fmt(100 * d.bits / total, 1)}%</span></summary>`;
+        for (const f of d.files.sort((a, b) => b.bits - a.bits)) {
+          const focused = state.focus && state.focus.source === f.i;
+          h += `<div class="frow" data-i="${f.i}" title="${esc(f.path)}"><code>${esc(f.path.slice(f.path.lastIndexOf("/") + 1))}</code><span class="n">${fmt(f.bits / 8, 0)} B</span><div class="bar" style="width:${Math.max(2, 54 * f.bits / maxBits)}px"></div><button data-focus="${f.i}" title="Show only this in the stream"${focused ? ' style="color:var(--accent)"' : ""}>◎</button></div>`;
+        }
+        h += `</details>`;
+      }
+      if (unmapped.bytes && (!q || "(not mapped)".includes(q))) h += `<div class="frow" data-unmapped="1"><code>(not mapped)</code><span class="n">${fmt(unmapped.bits / 8, 0)} B</span><div class="bar" style="width:${Math.max(2, 54 * unmapped.bits / maxBits)}px"></div><button data-focus="-1" title="Show only this in the stream">◎</button></div>`;
+      tree.innerHTML = h;
+      markFile();
+    };
+    draw();
+    filter.oninput = draw;
+    tree.onclick = e => {
+      const fb = e.target.closest("button[data-focus]");
+      if (fb) { const i = +fb.dataset.focus; setFocus(i < 0 ? { unmapped: true } : { source: i }); goTo(i < 0 ? unmapped.first : srcTotals[i].first); return; }
+      const row = e.target.closest(".frow");
+      if (!row) return;
+      if (row.dataset.unmapped) { setFocus({ unmapped: true }); goTo(unmapped.first); return; }
+      openSource(+row.dataset.i);
+    };
+  }
+  p.appendChild(h2("Cost by token kind"));
+  p.appendChild(table(S.token_kinds, [txt("kind", "kind"), num("count", "count", 0), num("bytes", "length", 0), num("bits", "bits"), num("bits/B", "bits_per_byte", 2)]));
+}
+function markFile() {
+  for (const r of document.querySelectorAll(".frow")) r.classList.toggle("on", state.view === "source" && !r.dataset.unmapped && +r.dataset.i === state.source);
+}
 
 const panels = {
   "Suggestions": p => {
     p.appendChild(note("Candidates worth looking into, largest cost first. They are heuristics: compress again to see what a change saves. Click one to show it."));
-    const maxBits = Math.max(1e-9, ...S.suggestions.map(s => s.bits));
+    const maxBits = Math.max(1e-9, ...S.suggestions.map(s => s.bits || 0));
     for (const s of S.suggestions) {
       const mag = s.bits ? ` · <span class="mag" style="color: hsl(${Math.round(125 * (1 - s.bits / maxBits))} 80% var(--mag-l))">${fmt(s.bits / 8)} bytes</span>` : "";
       const d = document.createElement("div");
       d.className = "sugg";
       d.innerHTML = `<div class="k" style="color: var(--k-${esc(s.kind)}, var(--accent))">${esc(s.kind)}${mag}</div><div>${esc(s.message)}</div><div class="q">rootsqz report &lt;dir&gt; ${esc(s.query)}</div>`;
-      if (s.start != null) d.onclick = () => goTo(s.start, s.end);
+      d.onclick = () => {
+        if (s.kind === "source") { const i = sources.findIndex(x => s.message.includes(x.path)); if (i >= 0) { openSource(i); return; } }
+        if (s.kind === "identifier") { const m = s.message.match(/`([^`]+)`/); if (m) { findText(m[1]); return; } }
+        if (s.start != null) goTo(s.start, s.end);
+      };
       p.appendChild(d);
     }
     if (!S.suggestions.length) p.appendChild(note("No suggestions."));
   },
-  "Sections": p => {
-    p.appendChild(note("The main JavaScript and each --file, in the order they are compressed. The model learns across them."));
-    p.appendChild(table(sections, [txt("#", "index"), { label: "file", html: r => `<code>${esc(nameOf(r))}</code>` }, num("bytes", "length", 0), num("cost", "cost_bytes"), num("bits/byte", "bits_per_byte", 3)], r => goTo(r.start, r.start + 1)));
-    if (S.sources.length) {
-      p.appendChild(h2("Original sources of the main JavaScript"));
-      p.appendChild(table(S.sources, [code("source", "path"), num("bytes", "length", 0), num("cost", "cost_bytes"), num("bits/byte", "bits_per_byte", 3), num("share", "share", 3)], r => goTo(r.first_start, r.first_start + 1)));
-    }
-    p.appendChild(h2("Cost by token kind"));
-    p.appendChild(table(S.token_kinds, [txt("kind", "kind"), num("count", "count", 0), num("bytes", "length", 0), num("bits", "bits"), num("bits/byte", "bits_per_byte", 3)]));
-  },
+  "Files": filesPanel,
   "Top": p => {
     const go = r => goTo(r.start ?? r.first_start, r.end ?? (r.first_start + r.length));
     p.appendChild(h2("Hotspots: most expensive 32 bytes"));
     p.appendChild(table(S.top.hotspots, [txt("line", "line"), num("bits", "bits"), num("b/B", "bits_per_byte", 2), code("text", "text")], go));
+    if (S.top.source_lines.length) {
+      p.appendChild(h2("Most expensive original source lines"));
+      p.appendChild(table(S.top.source_lines, [{ label: "source", html: r => `<code>${esc(r.path)}:${r.line ?? ""}</code>` }, num("bits", "bits"), code("text", "text")], r => { if (r.source != null && r.line != null) openSource(r.source, r.line); else goTo(r.first_start); }));
+    }
     p.appendChild(h2("Most expensive lines"));
     p.appendChild(table(S.top.lines, [txt("line", "line"), num("bits", "bits"), num("b/B", "bits_per_byte", 2), code("text", "text")], go));
     if (S.top.blocks.length) {
       p.appendChild(h2("Most expensive blocks"));
       p.appendChild(table(S.top.blocks, [txt("start", "start"), num("bits", "bits"), num("b/B", "bits_per_byte", 2)], go));
     }
-    if (S.top.source_lines.length) {
-      p.appendChild(h2("Most expensive original source lines"));
-      p.appendChild(table(S.top.source_lines, [{ label: "source", html: r => `<code>${esc(r.path)}:${r.line ?? ""}</code>` }, num("bits", "bits"), code("text", "text")], r => goTo(r.first_start, r.first_start + 1)));
-    }
     p.appendChild(h2("Identifiers by total cost"));
-    p.appendChild(table(S.top.identifiers, [code("ident", "text"), num("count", "count", 0), num("bits", "bits"), num("each", "bits_per_occurrence")], go));
+    p.appendChild(table(S.top.identifiers, [code("ident", "text"), num("count", "count", 0), num("bits", "bits"), num("each", "bits_per_occurrence")], r => findText(r.text)));
     p.appendChild(h2("Numbers by total cost"));
-    p.appendChild(table(S.top.numbers, [code("number", "text"), num("count", "count", 0), num("bits", "bits"), num("each", "bits_per_occurrence")], go));
+    p.appendChild(table(S.top.numbers, [code("number", "text"), num("count", "count", 0), num("bits", "bits"), num("each", "bits_per_occurrence")], r => findText(r.text)));
     p.appendChild(h2("Repeats that still cost"));
     p.appendChild(table(S.top.repeats, [txt("start", "start"), txt("earlier", "earlier_start"), num("bytes", "length", 0), num("bits", "bits"), code("text", "text")], go));
   },
@@ -341,13 +1014,17 @@ const panels = {
   },
   "Models": p => {
     if (!M) { p.appendChild(note(S.models.note)); return; }
-    p.appendChild(note("What each submodel alone would have cost. A submodel can help the mix even if it is bad alone. Click one to color the content by it."));
+    p.appendChild(note("What each submodel alone would have cost. A submodel can help the mix even if it is bad alone. Click one to color by it."));
     p.appendChild(table(S.models.summary, [txt("#", "model"), txt("name", "name"), num("bits", "bits"), num("over actual", "bits_over_actual"), num("best", "best_share", 3)], r => {
-      if (r.model == null) return;
-      $("mode").value = 1 + r.model; mode = modes[1 + r.model]; paint();
+      if (r.model == null || r.model === "") return;
+      $("mode").value = 1 + +r.model; state.mode = 1 + +r.model; legend(); rerenderAll(); if (state.view === "source") renderSource();
     }));
   },
-  "About": p => { for (const t of S.about) p.appendChild(note(t)); },
+  "About": p => {
+    for (const t of S.about) p.appendChild(note(t));
+    p.appendChild(h2("This page"));
+    p.appendChild(note("Hover a byte for details, click to pin them, double-click to open its original source. Find with / then Enter and Shift+Enter. Escape clears the selection. Dim hides cheap bytes. The strip on the right shows the whole stream, or the open source; click or drag it to jump. Click a file header to collapse it."));
+  },
 };
 let current = "Suggestions";
 function showPanel(name) {
@@ -356,7 +1033,15 @@ function showPanel(name) {
   const p = $("panel"); p.innerHTML = ""; panels[name](p);
 }
 $("tabs").onclick = e => { if (e.target.tagName === "BUTTON") showPanel(e.target.textContent); };
+
+// The tab bar has the height of the toolbar, also when the toolbar wraps.
+new ResizeObserver(() => document.documentElement.style.setProperty("--bar-h", $("toolbar").offsetHeight + "px")).observe($("toolbar"));
+
+buildChunks();
+for (const ch of chunks) observer.observe(ch.el);
+legend();
 showPanel(current);
+drawMini();
 </script>
 </body>
 </html>

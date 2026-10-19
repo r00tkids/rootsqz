@@ -16,7 +16,7 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 - With `report`, the plugin passes the source map of the bundle and names the imported files by their module in the report. It turns on `sourcemap: "hidden"` for that if no source map is set.
 
 ### Changed
-- **Breaking:** `--report` writes to `report/` in the output directory instead of `report.html` next to the output. `report.html` shows the cost of every byte in bits, keeps line breaks, covers the `--file` files, and has the summary, the suggestions and details per byte.
+- **Breaking:** `--report` writes to `report/` in the output directory instead of `report.html` next to the output. `report.html` shows the cost of every byte in bits, keeps line breaks, covers the `--file` files, and has the summary, the suggestions and details per byte. It stays fast with 64k intros. Files collapse, cheap bytes can be dimmed, and you can search the input. A strip on the side shows the whole input. Binary files show as hex. With a source map, it shows the original sources colored by cost, lists them by folder, and can show only the bytes of one of them.
 
 ### Fixed
 - `rootsqz web …` works. It failed because the options were also required before the subcommand.

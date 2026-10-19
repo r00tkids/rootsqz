@@ -69,7 +69,7 @@ Both presets are available for `web` and `node` targets. To customize a model, c
 `--report` writes a report of where the bytes go to `report/` in the output directory. It covers the whole compressed stream: the main JavaScript and every `--file`, in the order they are compressed.
 
 - `report.json`: a summary for analysis by people, scripts or an LLM. It has the totals, the layout of the output file, the cost of every input file, the cost by token kind, the most expensive places (hotspots, lines, identifiers, numbers, repeated strings), suggestions with what to look at next, and the model config. Its `about` entry explains how to read it.
-- `report.html`: the input colored by the cost of each byte. Hover over a byte for details, click a suggestion to show it.
+- `report.html`: the input colored by the cost of each byte. Hover over a byte for details, click a suggestion to show it. Collapse files, dim cheap bytes, search with `/`, and jump with the strip on the right. With a source map, the Sources view shows the original files colored by cost.
 - `data.bin`: what the model predicted for every bit, read by `rootsqz report`.
 
 The cost of a byte is the number of bits the compressor spends on it, so the costs add up to the size of the compressed stream. A byte costs less when similar bytes came before it, also in earlier files.
