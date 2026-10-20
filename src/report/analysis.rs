@@ -1404,6 +1404,22 @@ impl<'a> Analysis<'a> {
             if share < 0.05 {
                 continue;
             }
+            if text(get(row, &sources, "source")).is_empty() {
+                let first = num(get(row, &sources, "first_start")) as usize;
+                add(
+                    "source",
+                    bits,
+                    Some((first, first + 1)),
+                    format!(
+                        "{:.0} bytes that the source map or debug info does not cover cost {:.0} bytes, {:.0}% of the stream ({bpb:.2} bits per byte), starting at offset {first}. A plugin that changes code without a source map, e.g. one that minifies imported shaders, makes them.",
+                        num(get(row, &sources, "length")),
+                        bits / 8.,
+                        share * 100.
+                    ),
+                    format!("--view lines --range {first}..{}", first + 200),
+                );
+                continue;
+            }
             add(
                 "source",
                 bits,
