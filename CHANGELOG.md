@@ -4,6 +4,11 @@ All notable changes to rootsqz and its npm packages. The crate and all npm packa
 
 Changes that are not released yet are listed under Unreleased. On a release, that section gets the version and the date. The release workflow uses the section of a version as the notes of its GitHub release.
 
+## [Unreleased]
+
+### Added
+- `--decoder <serial|sliced|worker>` chooses how the web output decodes: in one go on the main thread, in slices on the main thread so the page repaints, or in a web worker so the page stays responsive while it decodes. The worker reports progress to a loader script like the sliced decoder. Without the option, the output is the same as before. The Node API and the plugin have the option `decoder`, and the Node API exports the type `Decoder`.
+
 ## [0.9.1] - 2026-10-20
 
 ### Fixed

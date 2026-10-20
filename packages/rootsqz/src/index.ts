@@ -132,14 +132,20 @@ export type ReportView =
   | "suggestions";
 
 /**
+ * How the web output decodes: in one go on the main thread, in slices on the main thread,
+ * or in a web worker. See `CompressOptions.decoder`.
+ */
+export type Decoder = "serial" | "sliced" | "worker";
+
+/**
  * Loader shown while the web output decompresses.
  * Either `preset`, or your own `html` and `js`; the executable rejects `preset` combined with `html` or `js`.
  */
 export type LoaderOptions = {
   /**
-   * Built-in loader (`--loader`): `"spinner"`, with the decoder running in one go,
-   * `"bar"`, a progress bar with the decoder running in slices,
-   * or `"progress"`, the browser's own progress bar (a `<progress>` element), also with the decoder running in slices.
+   * Built-in loader (`--loader`): `"spinner"`, with the decoder running in one go by default,
+   * `"bar"`, a progress bar with the decoder running in slices by default,
+   * or `"progress"`, the browser's own progress bar (a `<progress>` element), also with the decoder running in slices by default.
    */
   preset?: "spinner" | "bar" | "progress";
 
@@ -151,7 +157,7 @@ export type LoaderOptions = {
   /**
    * File with the script of the loader (`--loader-js`). It runs after the markup is inserted and sets
    * `rsqz.progress = (done, total) => ...`, which is called with the number of decoded bytes.
-   * The decoder then runs in slices, so the page repaints while decoding.
+   * The decoder then runs in slices by default, so the page repaints while decoding.
    */
   js?: string;
 
@@ -252,6 +258,13 @@ export type CompressOptions = RunOptions & {
   loader?: LoaderOptions;
 
   /**
+   * How the web output decodes (`--decoder`): `"serial"`, in one go on the main thread, `"sliced"`,
+   * on the main thread in slices so the page repaints, or `"worker"`, in a web worker so the page
+   * stays responsive. By default `"sliced"` with a loader script, otherwise `"serial"`.
+   */
+  decoder?: Decoder;
+
+  /**
    * Further arguments passed to the executable as they are.
    */
   extraArgs?: string[];
@@ -315,6 +328,9 @@ export function compressArgs(options: CompressOptions): string[] {
   }
   if (options.loader?.keep) {
     args.push("--loader-keep");
+  }
+  if (options.decoder) {
+    args.push("--decoder", options.decoder);
   }
   if (options.reportModels) {
     args.push("--report-models");

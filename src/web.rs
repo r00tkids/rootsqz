@@ -20,7 +20,7 @@ use crate::{
         ReportData, ReportOptions, Section, View, REPORT_DIR,
     },
 };
-use output_generator::{render_output, BundledFile, Loader, OutputGenerationOptions};
+use output_generator::{render_output, BundledFile, Decoder, Loader, OutputGenerationOptions};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -99,7 +99,7 @@ pub struct Args {
     pub loader_html: Option<PathBuf>,
 
     /// JavaScript run before the web output decompresses. It sets `rsqz.progress = (done, total) => ...`,
-    /// which is called with the number of decoded bytes while decoding runs in slices
+    /// which is called with the number of decoded bytes while decoding runs in slices or in a worker
     #[arg(long, value_name = "FILE")]
     pub loader_js: Option<PathBuf>,
 
@@ -107,19 +107,37 @@ pub struct Args {
     /// `rsqz.progress` stays, so the demo can continue the progress display
     #[arg(long)]
     pub loader_keep: bool,
+
+    /// How the web output decodes. By default `sliced` with a loader script, otherwise `serial`
+    #[arg(long, value_enum, value_name = "DECODER")]
+    pub decoder: Option<Decoder>,
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoaderPreset {
-    /// Spinning ring, with the decoder running in one go
+    /// Spinning ring, with the decoder running in one go by default
     Spinner,
-    /// Progress bar, with the decoder running in slices
+    /// Progress bar, with the decoder running in slices by default
     Bar,
-    /// The browser's own progress bar (a <progress> element), with the decoder running in slices
+    /// The browser's own progress bar (a <progress> element), with the decoder running in slices by default
     Progress,
 }
 
 impl Args {
+    /// The decoder given by --decoder, or the default for `loader`.
+    fn decoder(&self, loader: Option<&Loader>) -> Result<Decoder> {
+        match self.decoder {
+            Some(decoder) => {
+                if self.target != output_generator::Target::Web || self.brotli {
+                    bail!("--decoder is only supported for the web target without --brotli");
+                }
+                Ok(decoder)
+            }
+            None if loader.is_some_and(|loader| loader.js.is_some()) => Ok(Decoder::Sliced),
+            None => Ok(Decoder::Serial),
+        }
+    }
+
     /// The loader given by the options, or `None` without loader options.
     fn loader(&self) -> Result<Option<Loader>> {
         let read = |path: &Option<PathBuf>| -> Result<Option<String>> {
@@ -266,6 +284,7 @@ fn report_debug_info(
 
 pub fn run(args: Args) -> Result<()> {
     let loader = args.loader()?;
+    let decoder = args.decoder(loader.as_ref())?;
     let main_js_bytes = std::fs::read(&args.js_main)
         .with_context(|| format!("Failed to read JS main file: {}", args.js_main))?;
     if args.brotli {
@@ -415,6 +434,7 @@ pub fn run(args: Args) -> Result<()> {
             model_config: model_config.model.clone(),
             static_model_params: model_config.static_model_params.clone(),
             loader,
+            decoder,
         },
         size_before_compression,
         encoded_data,

@@ -56,6 +56,7 @@ Options:
 - `--brotli`: Use native Brotli decoding for web inputs (Firefox 147+ / Safari 18.4+).
 - `--config <file.json>`: Use a complete JSON `CompressConfig` instead of the embedded preset. This takes precedence over `--size-profile`.
 - `--loader <spinner|bar|progress>`, `--loader-html <file>`, `--loader-js <file>`, `--loader-keep`: Show a loader while the web output decompresses, see [Loader](#loader).
+- `--decoder <serial|sliced|worker>`: How the web output decodes, see [Decoder](#decoder).
 - `--report`, `-r`: Write a [compression report](#compression-report) to `report/` in the output directory.
 - `--report-models`: Also record what every submodel predicted (implies `--report`).
 - `--report-detail <VIEW,...>`: Also write these views of the report as TSV files, e.g. `lines,tokens` (implies `--report`).
@@ -110,9 +111,9 @@ Note: `<FILENAME>` refers to the base name of the file, not its full or relative
 ## Loader
 The web output can show a loader while it decompresses. Without loader options, the output is the same as before, not a byte larger.
 
-- `--loader spinner`: A spinning ring. The decoder runs in one go.
-- `--loader bar`: A progress bar. The decoder runs in slices.
-- `--loader progress`: The browser's own progress bar, a `<progress>` element, so it looks different in each browser. The decoder runs in slices. It is the smallest preset with progress.
+- `--loader spinner`: A spinning ring. By default, the decoder runs in one go.
+- `--loader bar`: A progress bar. By default, the decoder runs in slices.
+- `--loader progress`: The browser's own progress bar, a `<progress>` element, so it looks different in each browser. By default, the decoder runs in slices. It is the smallest preset with progress.
 - `--loader-html <file>`: Your own markup and CSS, e.g. `<style>…</style><div id=l></div>`. It is packed as it is, without minification, so keep it compact. Scripts in it do not run.
 - `--loader-js <file>`: Your own script. It runs after the markup is inserted, so it can use it. Set `rsqz.progress` in it:
   ```js
@@ -120,12 +121,21 @@ The web output can show a loader while it decompresses. Without loader options, 
       document.querySelector("#l").style.width = done / total * 100 + "%";
   };
   ```
-  It is called with the number of decoded bytes after each slice of about 12 ms, and with `total` at the end.
+  It is called with the number of decoded bytes about every 12 ms (16 ms with `--decoder worker`), and with `total` at the end. With `--decoder serial` it is not called while decoding.
 - `--loader-keep`: Keep the loader when the main JavaScript runs. By default the page is cleared first. With it, the demo can continue a progress bar during its own precalculation by calling `rsqz.progress` itself, and removes the loader when done.
 
 `--loader` cannot be combined with `--loader-html` or `--loader-js`; to change a preset, copy it from [src/web/templates/web/loaders](src/web/templates/web/loaders). Loaders are only for the `web` target without `--brotli`.
 
-How it works: the decoder blocks the main thread, and the browser paints nothing while it runs. With only `--loader-html`, the decoder runs in one go after the loader is painted once, so only CSS `transform` and `opacity` animations, which browsers run off the main thread, keep moving; a spinner works, a progress bar does not. With `--loader-js`, the decoder yields to the browser between slices, so the page repaints. This makes decoding slightly slower.
+How it works: by default, the decoder blocks the main thread, and the browser paints nothing while it runs. With only `--loader-html`, the decoder runs in one go after the loader is painted once, so only CSS `transform` and `opacity` animations, which browsers run off the main thread, keep moving; a spinner works, a progress bar does not. With `--loader-js`, the decoder yields to the browser between slices, so the page repaints. This makes decoding slightly slower. `--decoder` chooses this yourself, see below.
+
+## Decoder
+`--decoder` chooses how the web output decodes:
+
+- `serial`: In one go on the main thread. The smallest; the page does not repaint until it is done. The default without a loader script.
+- `sliced`: On the main thread, in slices of about 12 ms, so the page repaints between them and a loader script gets progress. The default with `--loader-js`, `--loader bar` and `--loader progress`.
+- `worker`: In a web worker, made from the decoder in the boot code, so the main thread stays free: the page stays responsive, any loader animates smoothly, and a loader script gets progress. It adds about 120 bytes without a loader, and about the same as `sliced` with one.
+
+Without `--decoder`, the output is the same as before. `--decoder` is only for the `web` target without `--brotli`.
 
 ## Vite / Rollup plugin
 [`@r00tkids/rollup-plugin-rootsqz`](packages/rollup-plugin-rootsqz) runs rootsqz on the bundle, so a Vite or Rollup project builds straight to one compressed HTML file.
@@ -175,7 +185,7 @@ Notes:
   document.body.insertAdjacentHTML("beforeend", "<canvas id=c>");
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
-- To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader).
+- To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader). To keep the page responsive while it decodes, set `decoder: "worker"`, see [Decoder](#decoder).
 - With `report: true`, the plugin writes a [compression report](#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set. For an imported `x.wasm`, it gives the report `x.debug.wasm` (the unstripped file) or `x.wasm.map` next to it as debug info, or the file that `reportWasmDebug: { 'src/x.wasm': 'build/x.full.wasm' }` names, so the report names its functions and maps them to source lines. Run `npx rootsqz install-skill` once to teach coding agents to use it ([For coding agents](#for-coding-agents)).
 
 See the [plugin README](packages/rollup-plugin-rootsqz) for all options and [examples/vite](examples/vite) for a working project with `vite-plugin-glsl`.

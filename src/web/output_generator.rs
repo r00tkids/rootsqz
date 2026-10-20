@@ -21,6 +21,19 @@ pub struct OutputGenerationOptions {
     pub static_model_params: StaticModelParams,
     /// Loader shown while the web output decompresses
     pub loader: Option<Loader>,
+    /// How the web output decodes
+    pub decoder: Decoder,
+}
+
+/// How the web output decodes
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decoder {
+    /// In one go on the main thread; the page does not repaint until it is done
+    Serial,
+    /// On the main thread in slices of about 12 ms, so the page repaints and the loader shows progress
+    Sliced,
+    /// In a web worker, so the page stays responsive and the loader shows progress
+    Worker,
 }
 
 /// Loader shown while the web output decompresses
@@ -28,7 +41,7 @@ pub struct OutputGenerationOptions {
 pub struct Loader {
     /// Markup inserted into the page before decoding
     pub html: Option<String>,
-    /// Script run before decoding. Decoding runs in slices and reports progress to `rsqz.progress` when set
+    /// Script run before decoding. The sliced and worker decoders report progress to `rsqz.progress` when set
     pub js: Option<String>,
     /// Keep the loader when the main JavaScript runs, instead of clearing the page
     pub keep: bool,
@@ -374,6 +387,7 @@ pub fn render_output(
         model_config,
         static_model_params,
         loader,
+        decoder,
     } = output_options;
 
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
@@ -382,12 +396,11 @@ pub fn render_output(
     let mut decompression_code =
         generate_js_decompression_code(&model_config, &static_model_params, &mut features_used);
     // Only the decoder that the boot code calls is included
-    let sliced = loader.as_ref().is_some_and(|loader| loader.js.is_some());
-    if sliced {
-        decompression_code += include_str!("js_source/coder_sliced.js");
-    } else {
-        decompression_code += include_str!("js_source/decompress.js");
-    }
+    decompression_code += match decoder {
+        Decoder::Serial => include_str!("js_source/decompress.js"),
+        Decoder::Sliced => include_str!("js_source/coder_sliced.js"),
+        Decoder::Worker => include_str!("js_source/coder_worker.js"),
+    };
 
     Ok(match target {
         Target::Web => {
@@ -468,6 +481,8 @@ pub fn render_output(
                         )?,
                         "loader_js": loader.as_ref().and_then(|loader| loader.js.as_deref()),
                         "keep": loader.as_ref().is_some_and(|loader| loader.keep),
+                        "sliced": decoder == Decoder::Sliced,
+                        "worker": decoder == Decoder::Worker,
                     }),
                 )
                 .context("Failed to render decompression code template")?;

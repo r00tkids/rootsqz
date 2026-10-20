@@ -3,9 +3,9 @@ import querystring from "node:querystring";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createFilter, FilterPattern } from "@rollup/pluginutils";
-import { compress, RUNTIME_GLOBAL, type LoaderOptions, type ReportView } from "@r00tkids/rootsqz";
+import { compress, RUNTIME_GLOBAL, type Decoder, type LoaderOptions, type ReportView } from "@r00tkids/rootsqz";
 
-export type { LoaderOptions };
+export type { Decoder, LoaderOptions };
 
 /**
  * A file that is passed to rootsqz next to the JavaScript bundle.
@@ -131,6 +131,13 @@ export type RootsqzOptions = {
    * Paths are relative to the working directory.
    */
   loader?: LoaderOptions;
+
+  /**
+   * How the output decodes: `"serial"`, in one go on the main thread, `"sliced"`, on the main thread
+   * in slices so the page repaints, or `"worker"`, in a web worker so the page stays responsive.
+   * By default `"sliced"` with a loader script, otherwise `"serial"`.
+   */
+  decoder?: Decoder;
 
   /**
    * Name of the global that the boot code of the executable puts the files in.
@@ -438,6 +445,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
           config: options.config,
           report: wantsReport,
           loader: options.loader,
+          decoder: options.decoder,
           reportModels: options.reportModels,
           reportDetail: options.reportDetail,
           reportSourceMap,

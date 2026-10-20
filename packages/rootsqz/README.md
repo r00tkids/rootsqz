@@ -60,6 +60,12 @@ await compress({
      * or your own `html` and `js` files. `keep` leaves it in place when the main JavaScript runs.
      */
     loader: { preset: 'bar' },
+
+    /**
+     * How the web output decodes: "serial", "sliced" or "worker" (in a web worker).
+     * By default "sliced" with a loader script, otherwise "serial".
+     */
+    decoder: 'worker',
 });
 ```
 

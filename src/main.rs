@@ -69,7 +69,7 @@ mod node_tests {
     use crate::compressor::model_finder::create_default_compress_config;
     use crate::compressor::Encoder;
     use crate::web::output_generator::{
-        self, generate_js_decompression_code, render_output, FileWithContent, Loader, ModelRef,
+        self, generate_js_decompression_code, render_output, Decoder, FileWithContent, Loader, ModelRef,
         OutputGenerationOptions,
     };
 
@@ -155,6 +155,7 @@ mod node_tests {
                 model_config: model_config.model.clone(),
                 static_model_params: model_config.static_model_params.clone(),
                 loader: None,
+                decoder: Decoder::Serial,
             },
             input_bytes.len(),
             encoded_data,
@@ -212,6 +213,7 @@ mod node_tests {
                 model_config: config.model,
                 static_model_params: config.static_model_params,
                 loader: None,
+                decoder: Decoder::Serial,
             },
             input.len(),
             encoded,
@@ -258,6 +260,7 @@ mod node_tests {
                 model_config: model_config.model.clone(),
                 static_model_params: model_config.static_model_params.clone(),
                 loader: None,
+                decoder: Decoder::Serial,
             },
             input_bytes.len(),
             encoded_data,
@@ -271,8 +274,9 @@ mod node_tests {
         .expect("Failed to render output");
     }
 
+    /// Renders the web output with every decoder, with and without a loader script
     #[test]
-    pub fn web_with_loader() {
+    pub fn web_decoders() {
         let model_config = create_default_compress_config();
         let input = b"document.body.append('loaded');";
         let mut encoded_data = Vec::new();
@@ -281,25 +285,88 @@ mod node_tests {
         encoder.encode_section(&input[..]).unwrap();
         encoder.finish().unwrap();
 
-        render_output(
-            OutputGenerationOptions {
-                output_dir: Path::new("testout/web_with_loader").to_owned(),
-                target: output_generator::Target::Web,
-                model_config: model_config.model,
-                static_model_params: model_config.static_model_params,
-                loader: Some(Loader {
+        for decoder in [Decoder::Serial, Decoder::Sliced, Decoder::Worker] {
+            for with_loader in [false, true] {
+                let loader = with_loader.then(|| Loader {
                     html: Some(include_str!("web/templates/web/loaders/bar.html").to_owned()),
                     js: Some(include_str!("web/templates/web/loaders/bar.js").to_owned()),
                     keep: true,
-                }),
-            },
-            input.len(),
-            encoded_data,
-            input.len(),
-            vec![],
-            vec![],
-        )
-        .expect("Failed to render output");
+                });
+                render_output(
+                    OutputGenerationOptions {
+                        output_dir: Path::new(&format!(
+                            "testout/web_decoders/{decoder:?}_{with_loader}"
+                        ))
+                        .to_owned(),
+                        target: output_generator::Target::Web,
+                        model_config: model_config.model.clone(),
+                        static_model_params: model_config.static_model_params.clone(),
+                        loader,
+                        decoder,
+                    },
+                    input.len(),
+                    encoded_data.clone(),
+                    input.len(),
+                    vec![],
+                    vec![],
+                )
+                .unwrap_or_else(|e| panic!("{decoder:?}, loader {with_loader}: {e:?}"));
+            }
+        }
+    }
+
+    /// Decodes with the worker decoder in node, and checks the output and the progress messages
+    #[test]
+    pub fn worker_round_trip() {
+        let model_config = create_default_compress_config();
+        let input = std::fs::read("tests/ray_tracer/index.js").unwrap();
+        let mut encoded_data = Vec::new();
+        let mut encoder =
+            Encoder::new(model_config.create_model().unwrap(), &mut encoded_data).unwrap();
+        encoder.encode_section(input.as_slice()).unwrap();
+        encoder.finish().unwrap();
+
+        let output_dir = Path::new("testout/worker_round_trip");
+        std::fs::create_dir_all(output_dir).unwrap();
+        std::fs::write(output_dir.join("input.pack"), &encoded_data).unwrap();
+        let mut features_used = ModelRef::None;
+        // postMessage stands in for the one of the worker
+        let script = format!(
+            r#"import fs from "node:fs";
+let progress = [];
+globalThis.postMessage = message => {{
+    if (typeof message == "number") return progress.push(message);
+    fs.writeFileSync(import.meta.dirname + "/output.bin", message);
+    fs.writeFileSync(import.meta.dirname + "/progress.json", JSON.stringify(progress));
+}};
+{}
+{}
+decompressWorker(model, new Uint8Array(fs.readFileSync(import.meta.dirname + "/input.pack")), {}, {});
+"#,
+            generate_js_decompression_code(
+                &model_config.model,
+                &model_config.static_model_params,
+                &mut features_used
+            ),
+            include_str!("web/js_source/coder_worker.js"),
+            encoded_data.len(),
+            input.len()
+        );
+        std::fs::write(output_dir.join("index.mjs"), script).unwrap();
+
+        assert!(Command::new("node")
+            .arg(output_dir.join("index.mjs"))
+            .status()
+            .unwrap()
+            .success());
+        assert_eq!(std::fs::read(output_dir.join("output.bin")).unwrap(), input);
+
+        let progress: Vec<usize> =
+            serde_json::from_slice(&std::fs::read(output_dir.join("progress.json")).unwrap())
+                .unwrap();
+        assert!(!progress.is_empty(), "the worker should post progress");
+        assert!(progress.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(progress.iter().all(|&done| done <= input.len()));
     }
 
     /// Decodes with the sliced decoder of the loaders in node, and checks the output and the progress calls
@@ -386,6 +453,7 @@ decompressSliced(model, new Uint8Array(fs.readFileSync(import.meta.dirname + "/i
                 model_config: model_config.model.clone(),
                 static_model_params: model_config.static_model_params.clone(),
                 loader: None,
+                decoder: Decoder::Serial,
             },
             input_bytes.len(),
             encoded_data,
