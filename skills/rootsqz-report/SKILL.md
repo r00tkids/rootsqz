@@ -45,7 +45,7 @@ Start with `report.json` in the report directory. Its `about` entry explains the
 - `suggestions`: candidates worth looking into, each with a `query` for `rootsqz report`.
 - `top`: the most expensive hotspots, identifiers, numbers and repeated strings, and blocks of binary files.
 - `models` (with `reportModels`): what each submodel alone would have cost.
-- `wasm` (with WebAssembly files): per wasm file its sections, most expensive functions and data segments, opcodes, and padded LEB128 numbers. `wasm_debug` tells where names and source lines came from.
+- `wasm` (with WebAssembly files): per wasm file its sections, most expensive functions and data segments, opcodes, and padded LEB128 numbers; `errors` lists what could not be decoded. `wasm_debug` tells where names and source lines came from.
 
 Do not read `report.html` (a viewer for people that embeds all the data), `data.bin` or `sources.json` (raw data for `rootsqz report`).
 

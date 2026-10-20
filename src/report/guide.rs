@@ -120,6 +120,13 @@ pub fn agents_md(summary: &Value) -> String {
             "- Section {index} `{}` is a wasm file: the views `wasm-sections`, `wasm-functions`, `wasm-instructions` and `wasm-opcode-totals` describe it; {names}.",
             section_name(index)
         );
+        let errors = wasm["errors"].as_array().map_or(0, |e| e.len());
+        if errors > 0 {
+            let _ = writeln!(
+                s,
+                "  - Parts of it could not be decoded ({errors} in `wasm[].errors` of report.json): a function with an instruction that could not be decoded ends in one instruction `(not decoded)`. The report of a newer rootsqz may decode them."
+            );
+        }
     }
     let models = summary["models"]["names"].as_array().map_or(0, |m| m.len());
     if models > 0 {

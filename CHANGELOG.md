@@ -9,6 +9,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 ### Added
 - `--decoder <serial|sliced|worker>` chooses how the web output decodes: in one go on the main thread, in slices on the main thread so the page repaints, or in a web worker so the page stays responsive while it decodes. The worker reports progress to a loader script like the sliced decoder. Without the option, the output is the same as before. The Node API and the plugin have the option `decoder`, and the Node API exports the type `Decoder`.
 
+### Fixed
+- The report reads WebAssembly files with SIMD and relaxed SIMD instructions. Before, it did not recognize such a file as wasm at all, so it showed no functions or names. An instruction that the report cannot decode now loses only the rest of its function, which shows as `(not decoded)`, and `wasm[].errors` in `report.json` lists it.
+
 ## [0.9.1] - 2026-10-20
 
 ### Fixed

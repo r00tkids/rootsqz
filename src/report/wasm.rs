@@ -88,6 +88,9 @@ pub struct WasmModule {
     pub custom: Vec<(String, Range<usize>)>,
     /// Bytes of LEB128 numbers that are not needed: section sizes, function sizes, immediates.
     pub padded: Vec<Range<usize>>,
+    /// What could not be decoded. A function with an instruction that could not be decoded
+    /// ends in one instruction `(not decoded)`; an error outside of the code ends the parsing.
+    pub errors: Vec<String>,
 }
 
 /// Length of the LEB128 number at the start of `bytes`, and how many of its bytes are not needed.
@@ -255,111 +258,166 @@ impl WasmModule {
         let mut functions = 0;
         let mut entry_start = 0;
         for payload in Parser::new(0).parse_all(bytes) {
-            match payload? {
-                Payload::ImportSection(reader) => {
-                    for imports in reader {
-                        let is_func = |ty: &TypeRef| matches!(ty, TypeRef::Func(_) | TypeRef::FuncExact(_));
-                        match imports? {
-                            wasmparser::Imports::Single(_, import) => {
-                                module.imported_functions += is_func(&import.ty) as u32
-                            }
-                            wasmparser::Imports::Compact1 { items, .. } => {
-                                for item in items {
-                                    module.imported_functions += is_func(&item?.ty) as u32;
-                                }
-                            }
-                            wasmparser::Imports::Compact2 { ty, names, .. } => {
-                                if is_func(&ty) {
-                                    module.imported_functions += names.count();
-                                }
-                            }
-                        }
-                    }
+            let payload = match payload {
+                Ok(payload) => payload,
+                Err(err) => {
+                    module.errors.push(format!("{err}"));
+                    break;
                 }
-                Payload::CodeSectionStart {
-                    unchecked_range, ..
-                } => {
-                    let start = unchecked_range.start as usize;
-                    module.code_start = Some(start);
-                    let (count_len, _) = leb_padding(&bytes[start..], false).unwrap_or((0, 0));
-                    entry_start = start + count_len;
-                }
-                Payload::CodeSectionEntry(body) => {
-                    let range = body.range();
-                    let (body_start, end) = (range.start as usize, range.end as usize);
-                    let padding = leb_padding(&bytes[entry_start..body_start], false)
-                        .map_or(0, |(_, p)| p);
-                    if padding > 0 {
-                        module.padded.push(body_start - padding..body_start);
-                    }
-                    let item = module.items.len();
-                    module.items.push(WasmItem {
-                        kind: ItemKind::Function,
-                        index: module.imported_functions + functions,
-                        start: entry_start,
-                        end,
-                        body_start,
-                        padding,
-                    });
-                    functions += 1;
-                    entry_start = end;
-
-                    let mut reader = body.get_operators_reader()?;
-                    let code_start = reader.original_position() as usize;
-                    if code_start > body_start {
-                        module.instructions.push(Instruction {
-                            start: body_start,
-                            end: code_start,
-                            item,
-                            op: "(locals)".to_owned(),
-                            operands: String::new(),
-                            padding: 0,
-                        });
-                    }
-                    while !reader.eof() {
-                        let (op, offset) = reader.read_with_offset()?;
-                        let (start, end) = (offset as usize, reader.original_position() as usize);
-                        let (name, operands) = describe(&op);
-                        let padded = instruction_padding(&bytes[start..end]);
-                        let padding = padded.iter().map(|r| r.len()).sum();
-                        module
-                            .padded
-                            .extend(padded.into_iter().map(|r| start + r.start..start + r.end));
-                        module.instructions.push(Instruction {
-                            start,
-                            end,
-                            item,
-                            op: name,
-                            operands,
-                            padding,
-                        });
-                    }
-                }
-                Payload::DataSection(reader) => {
-                    for (index, data) in reader.into_iter().enumerate() {
-                        let data = data?;
-                        module.items.push(WasmItem {
-                            kind: ItemKind::Data,
-                            index: index as u32,
-                            start: data.range.start as usize,
-                            end: data.range.end as usize,
-                            body_start: data.range.end as usize - data.data.len(),
-                            padding: 0,
-                        });
-                    }
-                }
-                Payload::CustomSection(reader) => {
-                    if let KnownCustom::Name(names) = reader.as_known() {
-                        // A broken name section only loses the names.
-                        let _ = read_names(names, &mut module);
-                    }
-                }
-                _ => {}
+            };
+            if let Err(err) = module.read_payload(bytes, payload, &mut functions, &mut entry_start) {
+                module.errors.push(format!("{err}"));
+                break;
             }
         }
         module.items.sort_by_key(|i| i.start);
         module.padded.sort_by_key(|r| r.start);
         Ok(module)
+    }
+
+    fn read_payload(
+        &mut self,
+        bytes: &[u8],
+        payload: Payload,
+        functions: &mut u32,
+        entry_start: &mut usize,
+    ) -> Result<()> {
+        let module = self;
+        match payload {
+            Payload::ImportSection(reader) => {
+                for imports in reader {
+                    let is_func = |ty: &TypeRef| matches!(ty, TypeRef::Func(_) | TypeRef::FuncExact(_));
+                    match imports? {
+                        wasmparser::Imports::Single(_, import) => {
+                            module.imported_functions += is_func(&import.ty) as u32
+                        }
+                        wasmparser::Imports::Compact1 { items, .. } => {
+                            for item in items {
+                                module.imported_functions += is_func(&item?.ty) as u32;
+                            }
+                        }
+                        wasmparser::Imports::Compact2 { ty, names, .. } => {
+                            if is_func(&ty) {
+                                module.imported_functions += names.count();
+                            }
+                        }
+                    }
+                }
+            }
+            Payload::CodeSectionStart {
+                unchecked_range, ..
+            } => {
+                let start = unchecked_range.start as usize;
+                module.code_start = Some(start);
+                let (count_len, _) = leb_padding(&bytes[start..], false).unwrap_or((0, 0));
+                *entry_start = start + count_len;
+            }
+            Payload::CodeSectionEntry(body) => {
+                let range = body.range();
+                let (body_start, end) = (range.start as usize, range.end as usize);
+                let padding = leb_padding(&bytes[*entry_start..body_start], false)
+                    .map_or(0, |(_, p)| p);
+                if padding > 0 {
+                    module.padded.push(body_start - padding..body_start);
+                }
+                let item = module.items.len();
+                let index = module.imported_functions + *functions;
+                module.items.push(WasmItem {
+                    kind: ItemKind::Function,
+                    index,
+                    start: *entry_start,
+                    end,
+                    body_start,
+                    padding,
+                });
+                *functions += 1;
+                *entry_start = end;
+
+                if let Err(err) = module.read_instructions(bytes, &body, item) {
+                    module
+                        .errors
+                        .push(format!("function {index}: {err}"));
+                    let from = module
+                        .instructions
+                        .last()
+                        .filter(|ins| ins.item == item)
+                        .map_or(body_start, |ins| ins.end);
+                    if from < end {
+                        module.instructions.push(Instruction {
+                            start: from,
+                            end,
+                            item,
+                            op: "(not decoded)".to_owned(),
+                            operands: String::new(),
+                            padding: 0,
+                        });
+                    }
+                }
+            }
+            Payload::DataSection(reader) => {
+                for (index, data) in reader.into_iter().enumerate() {
+                    let data = data?;
+                    module.items.push(WasmItem {
+                        kind: ItemKind::Data,
+                        index: index as u32,
+                        start: data.range.start as usize,
+                        end: data.range.end as usize,
+                        body_start: data.range.end as usize - data.data.len(),
+                        padding: 0,
+                    });
+                }
+            }
+            Payload::CustomSection(reader) => {
+                if let KnownCustom::Name(names) = reader.as_known() {
+                    // A broken name section only loses the names.
+                    let _ = read_names(names, module);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Reads the instructions of the function body `body`, the item `item`.
+    fn read_instructions(
+        &mut self,
+        bytes: &[u8],
+        body: &wasmparser::FunctionBody,
+        item: usize,
+    ) -> Result<()> {
+        let module = self;
+        let body_start = body.range().start as usize;
+        let mut reader = body.get_operators_reader()?;
+        let code_start = reader.original_position() as usize;
+        if code_start > body_start {
+            module.instructions.push(Instruction {
+                start: body_start,
+                end: code_start,
+                item,
+                op: "(locals)".to_owned(),
+                operands: String::new(),
+                padding: 0,
+            });
+        }
+        while !reader.eof() {
+            let (op, offset) = reader.read_with_offset()?;
+            let (start, end) = (offset as usize, reader.original_position() as usize);
+            let (name, operands) = describe(&op);
+            let padded = instruction_padding(&bytes[start..end]);
+            let padding = padded.iter().map(|r| r.len()).sum();
+            module
+                .padded
+                .extend(padded.into_iter().map(|r| start + r.start..start + r.end));
+            module.instructions.push(Instruction {
+                start,
+                end,
+                item,
+                op: name,
+                operands,
+                padding,
+            });
+        }
+        Ok(())
     }
 
     /// The item and instruction at `offset` (in the file).
@@ -775,6 +833,72 @@ mod tests {
         assert!(instruction_padding(&[0x43, 0x00, 0x00, 0x80, 0x00]).is_empty());
         // i32.load with a padded offset: align 2, offset 8.
         assert_eq!(instruction_padding(&[0x28, 0x02, 0x88, 0x80, 0x00]), [3..5]);
+    }
+
+    /// A module with one function type `() -> ()` and a function with each of the instructions
+    /// `code` (without locals and `end`).
+    fn module_with(code: &[&[u8]]) -> Vec<u8> {
+        fn leb(mut n: usize, out: &mut Vec<u8>) {
+            loop {
+                let byte = (n & 0x7f) as u8;
+                n >>= 7;
+                out.push(if n == 0 { byte } else { byte | 0x80 });
+                if n == 0 {
+                    break;
+                }
+            }
+        }
+        fn section(id: u8, contents: &[u8], out: &mut Vec<u8>) {
+            out.push(id);
+            leb(contents.len(), out);
+            out.extend_from_slice(contents);
+        }
+        let mut out = b"\0asm\x01\0\0\0".to_vec();
+        section(1, &[1, 0x60, 0, 0], &mut out);
+        let mut functions = Vec::new();
+        leb(code.len(), &mut functions);
+        functions.extend(std::iter::repeat(0).take(code.len()));
+        section(3, &functions, &mut out);
+        let mut bodies = Vec::new();
+        leb(code.len(), &mut bodies);
+        for c in code {
+            let body = [&[0][..], c, &[0x0b]].concat();
+            leb(body.len(), &mut bodies);
+            bodies.extend_from_slice(&body);
+        }
+        section(10, &bodies, &mut out);
+        out
+    }
+
+    #[test]
+    fn simd() {
+        let v128_const = [&[0xfd, 0x0c][..], &[7; 16]].concat();
+        // v128.const, v128.const, i8x16.relaxed_swizzle (0xfd 0x100), drop
+        let code = [&v128_const[..], &v128_const, &[0xfd, 0x80, 0x02], &[0x1a]].concat();
+        let m = WasmModule::parse(&module_with(&[&code])).unwrap();
+        assert!(m.errors.is_empty(), "{:?}", m.errors);
+        let ops: Vec<_> = m.instructions.iter().map(|i| i.op.as_str()).collect();
+        assert_eq!(ops, ["(locals)", "V128Const", "V128Const", "I8x16RelaxedSwizzle", "Drop", "End"]);
+    }
+
+    /// An instruction that cannot be decoded loses only the rest of its function.
+    #[test]
+    fn undecodable_instruction() {
+        let code: [&[u8]; 3] = [&[0x41, 0x05, 0x1a], &[0x41, 0x05, 0xff, 0x1a], &[0x01]];
+        let bytes = module_with(&code);
+        let m = WasmModule::parse(&bytes).unwrap();
+        assert_eq!(m.errors.len(), 1, "{:?}", m.errors);
+        assert!(m.errors[0].starts_with("function 1: "), "{:?}", m.errors);
+        let funcs: Vec<_> = m.items.iter().filter(|i| i.kind == ItemKind::Function).collect();
+        assert_eq!(funcs.len(), 3);
+        let ops = |item: usize| -> Vec<&str> {
+            m.instructions.iter().filter(|i| i.item == item).map(|i| i.op.as_str()).collect()
+        };
+        assert_eq!(ops(0), ["(locals)", "I32Const", "Drop", "End"]);
+        assert_eq!(ops(1), ["(locals)", "I32Const", "(not decoded)"]);
+        assert_eq!(ops(2), ["(locals)", "Nop", "End"]);
+        let rest = m.instructions.iter().find(|i| i.op == "(not decoded)").unwrap();
+        assert_eq!(rest.end, funcs[1].end);
     }
 
     #[test]

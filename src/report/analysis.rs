@@ -1700,7 +1700,7 @@ impl<'a> Analysis<'a> {
                 "The model learns from all bytes before a byte, also across sections, so a byte costs less if similar bytes came before. Reordering or changing earlier bytes changes the cost of later ones.",
                 "encoded_start and encoded_end are positions in the compressed stream before and after a range was coded; arithmetic coding spreads bits over bytes, so they are approximate. Add the offset of the 'compressed stream' part in outputs to get a position in the output file.",
                 "With --report-source-map, 'sources' and 'top.source_lines' tell which original source files and lines the bytes of the main JavaScript come from, and the views of byte ranges have the columns source and source_line (of their first byte). Debug info of wasm files (--report-wasm-debug) adds their source lines.",
-                "'wasm' describes each wasm file: its sections, most expensive functions and data segments, opcodes, and the bytes its LEB128 numbers use more than needed (padding). 'wasm_debug' tells where the names and source lines of a wasm file came from. The views wasm-sections, wasm-functions, wasm-instructions and wasm-opcode-totals have the details.",
+                "'wasm' describes each wasm file: its sections, most expensive functions and data segments, opcodes, and the bytes its LEB128 numbers use more than needed (padding). 'errors' lists what could not be decoded; such a function ends in an instruction '(not decoded)'. 'wasm_debug' tells where the names and source lines of a wasm file came from. The views wasm-sections, wasm-functions, wasm-instructions and wasm-opcode-totals have the details.",
                 "Submodel names are paths in config.model. With --report-models, 'models' tells what each submodel alone would have cost: a submodel can be useful in the mix even if it is bad alone.",
                 "More detail: 'rootsqz report <this directory> --view <view>' prints a view as tab separated rows; see 'views' and 'rootsqz report --help' for filters (--section, --range, --kind, --top, --sort, --min-bits, --models). The suggestions have such a query each.",
             ],
@@ -1746,7 +1746,7 @@ impl<'a> Analysis<'a> {
 
     fn wasm_summary(&self) -> Vec<Value> {
         self.wasm_in(&Filter::default())
-            .map(|(i, s, _)| {
+            .map(|(i, s, module)| {
                 let filter = |top: usize| Filter {
                     section: Some(i),
                     top: Some(top),
@@ -1764,6 +1764,7 @@ impl<'a> Analysis<'a> {
                         "bytes": bytes,
                         "bits": (bits * 100.).round() / 100.,
                     },
+                    "errors": module.errors,
                 })
             })
             .collect()
