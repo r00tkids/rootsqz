@@ -13,6 +13,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 ### Changed
 - The views `sources` and `source-lines`, `--source` and the Sources view of `report.html` cover every mapped file, not only the main JavaScript. Reports written by earlier versions cannot be read; compress again.
 
+### Fixed
+- `report.html` counts bytes at the start of the stream that no source map covers as "(not mapped)".
+
 ## [0.8.0] - 2026-10-20
 
 ### Added

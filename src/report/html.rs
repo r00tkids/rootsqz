@@ -67,7 +67,7 @@ pub fn write(analysis: &Analysis, summary: &Value, path: &Path) -> Result<()> {
     let (sources, runs) = match &data.source_mapping {
         Some(m) => {
             let mut runs = Vec::new();
-            let mut previous = Some(None);
+            let mut previous = None;
             for (offset, pos) in m.positions.iter().enumerate() {
                 if previous != Some(*pos) {
                     let (source, line, column) =
