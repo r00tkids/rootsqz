@@ -4,7 +4,7 @@ All notable changes to rootsqz and its npm packages. The crate and all npm packa
 
 Changes that are not released yet are listed under Unreleased. On a release, that section gets the version and the date. The release workflow uses the section of a version as the notes of its GitHub release.
 
-## [Unreleased]
+## [0.9.1] - 2026-10-20
 
 ### Fixed
 - The suggestion about bytes that the source map does not cover, e.g. shaders that a plugin minified, tells where they start, instead of a query for a source "(not mapped)" that does not work.
@@ -121,6 +121,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.9.1]: https://github.com/r00tkids/rootsqz/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/r00tkids/rootsqz/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/r00tkids/rootsqz/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/r00tkids/rootsqz/compare/v0.6.0...v0.7.0
