@@ -4,7 +4,7 @@ All notable changes to rootsqz and its npm packages. The crate and all npm packa
 
 Changes that are not released yet are listed under Unreleased. On a release, that section gets the version and the date. The release workflow uses the section of a version as the notes of its GitHub release.
 
-## [Unreleased]
+## [0.9.0] - 2026-10-20
 
 ### Added
 - The report parses WebAssembly files given with `--file` or imported with the plugin. The views `wasm-sections`, `wasm-functions`, `wasm-instructions` and `wasm-opcode-totals` show what each section, function, data segment and opcode costs, and `hotspots` and `bytes` name the function and instruction of each row. Suggestions point out custom sections of tools left in the file, padded LEB128 numbers, and the most expensive functions. `report.html` has a Wasm tab and names the function and instruction of each byte.
@@ -116,6 +116,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.9.0]: https://github.com/r00tkids/rootsqz/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/r00tkids/rootsqz/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/r00tkids/rootsqz/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/r00tkids/rootsqz/compare/v0.5.1...v0.6.0
