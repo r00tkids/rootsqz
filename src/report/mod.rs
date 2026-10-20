@@ -7,6 +7,7 @@ mod html;
 pub mod query;
 pub mod source_map;
 mod table;
+pub mod wasm;
 
 use std::{
     fs,
@@ -23,7 +24,8 @@ use crate::{
 };
 
 pub use analysis::View;
-use source_map::{SourceFile, SourceMapping, SourcePos};
+use source_map::{MapFile, SourceFile, SourceMapping, SourcePos};
+use wasm::WasmDebug;
 
 /// Directory in the output directory that the report is written to.
 pub const REPORT_DIR: &str = "report";
@@ -87,8 +89,10 @@ pub struct ReportData {
     /// Names of the submodels, empty if their predictions were not recorded.
     pub model_names: Vec<String>,
     pub recording: Recording,
-    /// Original positions of the main JavaScript, from --report-source-map.
+    /// Original positions of the bytes, from --report-source-map and the debug info of wasm files.
     pub source_mapping: Option<SourceMapping>,
+    /// Names and other debug info of the wasm files.
+    pub wasm_debug: Vec<WasmDebug>,
 }
 
 /// What `--report` writes, besides the summary.
@@ -187,12 +191,17 @@ impl ReportData {
         let data = fs::read(dir.join(DATA_FILE)).context("Failed to read data.bin")?;
         let n = sections.iter().map(|s| s.length).sum::<usize>();
         let m = model_names.len();
-        let map_path = summary["source_map"]["file"].as_str().map(str::to_owned);
-        let mapped = if map_path.is_some() {
-            sections[0].length
+        let maps: Option<Vec<MapFile>> = if summary["source_map"].is_null() {
+            None
         } else {
-            0
+            Some(serde_json::from_value(field(
+                "source_map.maps",
+                &summary["source_map"]["maps"],
+            )?)?)
         };
+        let wasm_debug: Vec<WasmDebug> =
+            serde_json::from_value(field("wasm_debug", &summary["wasm_debug"])?)?;
+        let mapped = if maps.is_some() { n } else { 0 };
         let expected = n + 4 * n + 4 * 8 * n + 4 * 8 * n * m + 12 * mapped;
         ensure!(
             data.len() == expected,
@@ -214,9 +223,9 @@ impl ReportData {
                 .collect()
         };
 
-        let source_mapping = match map_path {
+        let source_mapping = match maps {
             None => None,
-            Some(map_path) => {
+            Some(maps) => {
                 let sources: Vec<SourceFile> = serde_json::from_slice(
                     &fs::read(dir.join(SOURCES_FILE)).context("Failed to read sources.json")?,
                 )
@@ -233,7 +242,7 @@ impl ReportData {
                     })
                     .collect();
                 Some(SourceMapping {
-                    map_path,
+                    maps,
                     sources,
                     positions,
                 })
@@ -242,6 +251,7 @@ impl ReportData {
 
         Ok(Self {
             source_mapping,
+            wasm_debug,
             config,
             config_json,
             sections,
@@ -281,7 +291,7 @@ mod tests {
     use crate::compressor::{model_finder::DEFAULT_CONFIG_JSON, Encoder};
 
     /// A source map that maps every line of `js` to the same line of `orig.js`.
-    fn line_source_map(js: &[u8]) -> super::SourceMapping {
+    fn line_source_map(js: &[u8]) -> super::source_map::FileMapping {
         let lines = js.split(|&b| b == b'\n').count();
         let mappings = std::iter::once("AAAA")
             .chain(std::iter::repeat("AACA").take(lines - 1))
@@ -295,7 +305,7 @@ mod tests {
             format!(r#"{{"version":3,"sources":["orig.js"],"mappings":"{mappings}"}}"#),
         )
         .unwrap();
-        super::SourceMapping::read(&path, js).unwrap()
+        super::source_map::FileMapping::read(&path, js).unwrap()
     }
 
     fn encode(config: &CompressConfig, sections: &[&[u8]], record: bool) -> (Vec<u8>, ReportData) {
@@ -330,6 +340,7 @@ mod tests {
             outputs: Vec::new(),
             recording,
             source_mapping: None,
+            wasm_debug: Vec::new(),
         };
         (encoded, data)
     }
@@ -341,15 +352,37 @@ mod tests {
         let binary: Vec<u8> = (0..2000u32)
             .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
             .collect();
-        let sections: [&[u8]; 2] = [&js, &binary];
+        let wasm = std::fs::read("tests/wasm/fixture.wasm").unwrap();
+        let sections: [&[u8]; 3] = [&js, &binary, &wasm];
 
         let (plain, _) = encode(&config, &sections, false);
         let (encoded, mut data) = encode(&config, &sections, true);
-        data.source_mapping = Some(line_source_map(&js));
+        let mut mapping = super::SourceMapping::new(js.len() + binary.len() + wasm.len());
+        mapping.add(
+            0,
+            super::MapFile {
+                section: 0,
+                file: "index.js.map".to_owned(),
+                kind: "source map".to_owned(),
+            },
+            line_source_map(&js),
+        );
+        data.source_mapping = Some(mapping);
+        let (debug, _) = super::wasm::debug_info(
+            2,
+            &wasm,
+            &[std::path::PathBuf::from("tests/wasm/fixture.debug.wasm")],
+            true,
+        )
+        .unwrap();
+        data.wasm_debug = vec![debug];
         data.sections[1].label = Some("random.bin".to_owned());
         assert_eq!(plain, encoded, "recording must not change the output");
 
-        assert_eq!(data.recording.input.len(), js.len() + binary.len());
+        assert_eq!(
+            data.recording.input.len(),
+            js.len() + binary.len() + wasm.len()
+        );
         assert_eq!(data.recording.submodel_count, data.model_names.len());
         assert!(data.sections[0].text && !data.sections[1].text);
 
@@ -391,6 +424,7 @@ mod tests {
         assert_eq!(read.recording.submodel_preds, data.recording.submodel_preds);
         assert_eq!(read.model_names, data.model_names);
         assert_eq!(read.sections[1].label.as_deref(), Some("random.bin"));
+        assert_eq!(read.wasm_debug, data.wasm_debug);
         assert_eq!(
             read.source_mapping.as_ref().unwrap().positions,
             data.source_mapping.as_ref().unwrap().positions
@@ -432,5 +466,26 @@ mod tests {
         // Every line maps to the same line of orig.js, so source lines and lines agree.
         let source_lines = analysis.view(View::SourceLines, &Filter::default());
         assert_eq!(source_lines.rows.len(), lines.rows.len());
+
+        // The wasm functions and data segments cover the code and data sections, with names.
+        let functions = analysis.view(View::WasmFunctions, &Filter::default());
+        let name = functions.columns.iter().position(|c| c == "name").unwrap();
+        let names: Vec<String> = functions.rows.iter().map(|r| format!("{:?}", r[name])).collect();
+        assert!(names.iter().any(|n| n.contains("render")), "{names:?}");
+        let wasm_start = js.len() + binary.len();
+        let hotspots = analysis.view(
+            View::Hotspots,
+            &Filter {
+                section: Some(2),
+                ..Filter::default()
+            },
+        );
+        assert!(hotspots.columns.contains(&"wasm_item".to_owned()));
+        let instructions = analysis.view(View::WasmInstructions, &Filter::default());
+        let start = instructions.columns.iter().position(|c| c == "start").unwrap();
+        assert!(instructions
+            .rows
+            .iter()
+            .all(|r| matches!(r[start], super::table::Cell::Int(o) if o as usize >= wasm_start)));
     }
 }

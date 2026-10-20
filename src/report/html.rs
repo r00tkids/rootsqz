@@ -63,7 +63,7 @@ pub fn write(analysis: &Analysis, summary: &Value, path: &Path) -> Result<()> {
         })
         .collect();
 
-    // Source positions of the main JavaScript as runs: start, source (u32::MAX for none), line, column.
+    // Source positions as runs: start, source (u32::MAX for none), line, column.
     let (sources, runs) = match &data.source_mapping {
         Some(m) => {
             let mut runs = Vec::new();
@@ -89,6 +89,30 @@ pub fn write(analysis: &Analysis, summary: &Value, path: &Path) -> Result<()> {
         None => (Vec::new(), String::new()),
     };
 
+    // Per wasm section: its parts, and each instruction's start and opcode.
+    let wasm: Vec<Value> = analysis
+        .wasm_html()
+        .into_iter()
+        .map(|w| {
+            let starts: Vec<u8> = w
+                .instructions
+                .iter()
+                .flat_map(|i| (i.0 as u32).to_le_bytes())
+                .collect();
+            let ops: Vec<u8> = w.instructions.iter().flat_map(|i| i.1.to_le_bytes()).collect();
+            let operands: Vec<&str> = w.instructions.iter().map(|i| i.2.as_str()).collect();
+            json!({
+                "section": w.section,
+                "regions": w.regions,
+                "opcodes": w.opcodes,
+                "starts": base64(&starts),
+                "ops": base64(&ops),
+                "operands": operands.join("\n"),
+                "padded": w.padded,
+            })
+        })
+        .collect();
+
     let payload = json!({
         "summary": summary,
         "input": base64(&data.recording.input),
@@ -97,6 +121,7 @@ pub fn write(analysis: &Analysis, summary: &Value, path: &Path) -> Result<()> {
         "encodedSteps": base64(&encoded_steps),
         "sources": sources,
         "sourceRuns": runs,
+        "wasm": wasm,
     });
     let script = serde_json::to_string(&payload)?.replace("</", "<\\/");
     fs::write(path, TEMPLATE.replace("/*REPORT_DATA*/null", &script))?;

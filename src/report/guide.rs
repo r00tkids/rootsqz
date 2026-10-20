@@ -52,17 +52,74 @@ pub fn agents_md(summary: &Value) -> String {
             num(&section["bits_per_byte"]),
         );
     }
+    let section_name = |index: &Value| -> String {
+        summary["sections"]
+            .as_array()
+            .and_then(|all| all.iter().find(|s| s["index"] == *index))
+            .and_then(|s| s["label"].as_str().or(s["path"].as_str()))
+            .unwrap_or("?")
+            .to_owned()
+    };
     match summary["source_map"].as_object() {
         Some(map) => {
             let _ = writeln!(
                 s,
-                "- Source map: `{}`, {} original source files, {} bytes of the main JavaScript mapped. The views `sources` and `source-lines`, the filter `--source` and the columns `source` and `source_line` work.",
-                map["file"].as_str().unwrap_or("?"),
-                map["sources"],
-                map["mapped_bytes"],
+                "- Source positions: {} original source files, {} bytes mapped. The views `sources` and `source-lines`, the filter `--source` and the columns `source` and `source_line` work. From:",
+                map["sources"], map["mapped_bytes"],
             );
+            for m in map["maps"].as_array().into_iter().flatten() {
+                let _ = writeln!(
+                    s,
+                    "  - `{}` ({}) for section {} `{}`",
+                    m["file"].as_str().unwrap_or("?"),
+                    m["kind"].as_str().unwrap_or("?"),
+                    m["section"],
+                    section_name(&m["section"]),
+                );
+            }
         }
-        None => s += "- No source map: costs are not mapped to original source files. Compress with `--report-source-map` (the plugin does it by itself).\n",
+        None => s += "- No source positions: costs are not mapped to original source files. Compress with `--report-source-map` (the plugin does it by itself), and give wasm files their debug info (`--report-wasm-debug`).\n",
+    }
+    for wasm in summary["wasm"].as_array().into_iter().flatten() {
+        let index = &wasm["section"];
+        let debug = summary["wasm_debug"]
+            .as_array()
+            .and_then(|all| all.iter().find(|d| d["section"] == *index));
+        let names = match debug {
+            Some(d) => {
+                let files: Vec<String> = d["files"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|f| {
+                        let gave: Vec<&str> = f["gave"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|g| g.as_str())
+                            .collect();
+                        let gave = if gave.is_empty() {
+                            "nothing".to_owned()
+                        } else {
+                            gave.join(", ")
+                        };
+                        format!("`{}` ({gave})", f["path"].as_str().unwrap_or("?"))
+                    })
+                    .collect();
+                let unmatched = d["unmatched_functions"].as_array().map_or(0, |u| u.len());
+                let mut text = format!("debug info from {}", files.join(", "));
+                if unmatched > 0 {
+                    text += &format!(", which does not apply to {unmatched} functions whose code differs");
+                }
+                text
+            }
+            None => "no debug info: functions have no names; give the unstripped file with `--report-wasm-debug`".to_owned(),
+        };
+        let _ = writeln!(
+            s,
+            "- Section {index} `{}` is a wasm file: the views `wasm-sections`, `wasm-functions`, `wasm-instructions` and `wasm-opcode-totals` describe it; {names}.",
+            section_name(index)
+        );
     }
     let models = summary["models"]["names"].as_array().map_or(0, |m| m.len());
     if models > 0 {

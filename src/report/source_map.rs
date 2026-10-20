@@ -1,4 +1,5 @@
-//! Maps the bytes of the main JavaScript to positions in its original sources, with a source map.
+//! Maps the bytes of the stream to positions in their original sources: the main JavaScript with
+//! its source map, wasm files with theirs or with their debug info.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -24,14 +25,84 @@ pub struct SourcePos {
     pub column: u32,
 }
 
-/// Where each byte of the main JavaScript came from.
+/// Where each byte of one file came from.
+#[derive(Debug, Clone, Default)]
+pub struct FileMapping {
+    pub sources: Vec<SourceFile>,
+    /// One per byte of the file; `None` where nothing maps it.
+    pub positions: Vec<Option<SourcePos>>,
+}
+
+/// A file that source positions came from, e.g. a source map.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MapFile {
+    /// Index of the section of the stream that it maps.
+    pub section: usize,
+    pub file: String,
+    /// `source map`, `wasm source map` or `dwarf`.
+    pub kind: String,
+}
+
+/// Where each byte of the stream came from.
 #[derive(Debug, Clone)]
 pub struct SourceMapping {
-    /// The source map file, as given.
-    pub map_path: String,
+    pub maps: Vec<MapFile>,
     pub sources: Vec<SourceFile>,
-    /// One per byte of the main JavaScript; `None` where the source map has no mapping.
+    /// One per byte of the stream; `None` where nothing maps it.
     pub positions: Vec<Option<SourcePos>>,
+}
+
+impl SourceMapping {
+    /// No mappings yet, for a stream of `len` bytes.
+    pub fn new(len: usize) -> Self {
+        Self {
+            maps: Vec::new(),
+            sources: Vec::new(),
+            positions: vec![None; len],
+        }
+    }
+
+    /// Adds the mapping of the file at `start` in the stream. Sources with the same path are
+    /// merged; sources without content get it from the file if it can be read.
+    pub fn add(&mut self, start: usize, map: MapFile, part: FileMapping) {
+        let index: Vec<u32> = part
+            .sources
+            .into_iter()
+            .map(|source| {
+                let found = self.sources.iter().position(|s| s.path == source.path);
+                let i = found.unwrap_or_else(|| {
+                    self.sources.push(SourceFile {
+                        path: source.path.clone(),
+                        content: None,
+                    });
+                    self.sources.len() - 1
+                });
+                if self.sources[i].content.is_none() {
+                    self.sources[i].content = source.content.or_else(|| read_source(&source.path));
+                }
+                i as u32
+            })
+            .collect();
+        for (k, pos) in part.positions.into_iter().enumerate() {
+            if let (Some(pos), Some(slot)) = (pos, self.positions.get_mut(start + k)) {
+                *slot = Some(SourcePos {
+                    source: index[pos.source as usize],
+                    ..pos
+                });
+            }
+        }
+        self.maps.push(map);
+    }
+}
+
+/// The content of a source file that the source map does not include, if it is a readable text
+/// file of a sensible size.
+fn read_source(path: &str) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > 4 << 20 {
+        return None;
+    }
+    std::fs::read_to_string(path).ok()
 }
 
 #[derive(Deserialize)]
@@ -50,7 +121,7 @@ struct RawSourceMap {
     sections: Option<serde_json::Value>,
 }
 
-impl SourceMapping {
+impl FileMapping {
     /// Reads the source map at `map_path` for the JavaScript `js`.
     pub fn read(map_path: &Path, js: &[u8]) -> Result<Self> {
         let text = std::fs::read_to_string(map_path)
@@ -59,30 +130,43 @@ impl SourceMapping {
             .with_context(|| format!("Failed to parse source map: {}", map_path.display()))
     }
 
-    fn parse(text: &str, map_path: &Path, js: &[u8]) -> Result<Self> {
-        let raw: RawSourceMap = serde_json::from_str(text)?;
-        ensure!(raw.version == 3, "only version 3 source maps are supported");
-        if raw.sections.is_some() {
-            bail!("index source maps (with \"sections\") are not supported");
+    /// Reads the source map at `map_path` of a wasm file of `len` bytes, as written by e.g.
+    /// AssemblyScript or emscripten: its columns are byte offsets in the file.
+    pub fn read_wasm(map_path: &Path, len: usize) -> Result<Self> {
+        let text = std::fs::read_to_string(map_path)
+            .with_context(|| format!("Failed to read source map: {}", map_path.display()))?;
+        Self::parse_wasm(&text, map_path, len)
+            .with_context(|| format!("Failed to parse source map: {}", map_path.display()))
+    }
+
+    fn parse_wasm(text: &str, map_path: &Path, len: usize) -> Result<Self> {
+        let (raw, sources) = parse_raw(text, map_path)?;
+        let lines = decode_mappings(&raw.mappings)?;
+        ensure!(
+            lines.len() <= 1,
+            "it has {} lines of mappings, a wasm source map has one",
+            lines.len()
+        );
+        let segments = lines.into_iter().next().unwrap_or_default();
+        let mut positions = vec![None; len];
+        for (k, segment) in segments.iter().enumerate() {
+            let start = (segment.column as usize).min(len);
+            let end = segments
+                .get(k + 1)
+                .map_or(len, |next| (next.column as usize).min(len));
+            let pos = segment.source.map(|(source, l, c)| SourcePos {
+                source,
+                line: l + 1,
+                column: c + 1,
+            });
+            positions[start..end].fill(pos);
         }
+        check_sources(&positions, sources.len())?;
+        Ok(Self { sources, positions })
+    }
 
-        let base = map_path.parent().unwrap_or(Path::new(""));
-        let cwd = std::env::current_dir().ok();
-        let sources = raw
-            .sources
-            .iter()
-            .enumerate()
-            .map(|(i, source)| SourceFile {
-                path: resolve_source(
-                    source.as_deref().unwrap_or(""),
-                    raw.source_root.as_deref(),
-                    base,
-                    cwd.as_deref(),
-                ),
-                content: raw.sources_content.get(i).cloned().flatten(),
-            })
-            .collect::<Vec<_>>();
-
+    fn parse(text: &str, map_path: &Path, js: &[u8]) -> Result<Self> {
+        let (raw, sources) = parse_raw(text, map_path)?;
         let segments = decode_mappings(&raw.mappings)?;
         let source_lines: Vec<Option<Vec<&str>>> = sources
             .iter()
@@ -142,21 +226,46 @@ impl SourceMapping {
             }
             line_start += line_bytes.len() + 1;
         }
-        for pos in positions.iter().flatten() {
-            ensure!(
-                (pos.source as usize) < sources.len(),
-                "a mapping refers to source {}, but there are only {}",
-                pos.source,
-                sources.len()
-            );
-        }
-
-        Ok(Self {
-            map_path: map_path.display().to_string(),
-            sources,
-            positions,
-        })
+        check_sources(&positions, sources.len())?;
+        Ok(Self { sources, positions })
     }
+}
+
+fn parse_raw(text: &str, map_path: &Path) -> Result<(RawSourceMap, Vec<SourceFile>)> {
+    let raw: RawSourceMap = serde_json::from_str(text)?;
+    ensure!(raw.version == 3, "only version 3 source maps are supported");
+    if raw.sections.is_some() {
+        bail!("index source maps (with \"sections\") are not supported");
+    }
+    let base = map_path.parent().unwrap_or(Path::new(""));
+    let cwd = std::env::current_dir().ok();
+    let sources = raw
+        .sources
+        .iter()
+        .enumerate()
+        .map(|(i, source)| SourceFile {
+            path: resolve_source(
+                source.as_deref().unwrap_or(""),
+                raw.source_root.as_deref(),
+                base,
+                cwd.as_deref(),
+            ),
+            content: raw.sources_content.get(i).cloned().flatten(),
+        })
+        .collect::<Vec<_>>();
+    Ok((raw, sources))
+}
+
+fn check_sources(positions: &[Option<SourcePos>], sources: usize) -> Result<()> {
+    for pos in positions.iter().flatten() {
+        ensure!(
+            (pos.source as usize) < sources,
+            "a mapping refers to source {}, but there are only {}",
+            pos.source,
+            sources
+        );
+    }
+    Ok(())
 }
 
 /// The last mapping of an earlier generated line, for the lines after it that have no mapping
@@ -360,7 +469,7 @@ fn relative_to(path: &Path, base: &Path) -> PathBuf {
 mod tests {
     use std::path::Path;
 
-    use super::{decode_vlq, relative_to, SourceMapping, SourcePos};
+    use super::{decode_vlq, relative_to, FileMapping, MapFile, SourceFile, SourceMapping, SourcePos};
 
     #[test]
     fn relative_paths() {
@@ -380,7 +489,7 @@ mod tests {
         let map = r#"{"version":3,"sources":["t.ts"],
             "sourcesContent":["f(`\nstruct A\n  let  y = 1; // c\n}\n`)"],"mappings":"AAAA"}"#;
         let js = "f(`\nstruct A\nlet y=1;\n}\n`);".as_bytes();
-        let m = SourceMapping::parse(map, Path::new("t.js.map"), js).unwrap();
+        let m = FileMapping::parse(map, Path::new("t.js.map"), js).unwrap();
         let pos = |line, column| {
             Some(SourcePos {
                 source: 0,
@@ -407,7 +516,7 @@ mod tests {
         // Line 2 is code that the source map does not cover, e.g. an imported file without a map.
         let map = r#"{"version":3,"sources":["t.ts"],"sourcesContent":["a();\n}"],"mappings":"AAAA,IACA"}"#;
         let js = "a();}\nconst shader = 1;".as_bytes();
-        let m = SourceMapping::parse(map, Path::new("t.js.map"), js).unwrap();
+        let m = FileMapping::parse(map, Path::new("t.js.map"), js).unwrap();
         assert_eq!(m.positions[6], None);
     }
 
@@ -425,7 +534,7 @@ mod tests {
         let map = r#"{"version":3,"sources":["src/a.js","b.js"],"sourcesContent":["x",null],
             "mappings":"AAAA,EAAE;ACEE"}"#;
         let js = "ab;\ncd".as_bytes();
-        let m = SourceMapping::parse(map, Path::new("dist/out.js.map"), js).unwrap();
+        let m = FileMapping::parse(map, Path::new("dist/out.js.map"), js).unwrap();
         assert_eq!(m.sources[0].path, "dist/src/a.js");
         assert_eq!(m.sources[0].content.as_deref(), Some("x"));
         let pos = |source, line, column| {
@@ -446,5 +555,47 @@ mod tests {
                 pos(1, 3, 5)
             ]
         );
+    }
+
+    #[test]
+    fn wasm_map() {
+        // Bytes 10..14 from a.c line 3, 14..20 from line 4 column 2, the rest unmapped.
+        let map = r#"{"version":3,"sources":["a.c"],"mappings":"UAEA,IACC,MAAC,M"}"#;
+        let m = FileMapping::parse_wasm(map, Path::new("x.wasm.map"), 30).unwrap();
+        let at = |o: usize| m.positions[o].map(|p| (p.line, p.column));
+        assert_eq!(at(9), None);
+        assert_eq!(at(10), Some((3, 1)));
+        assert_eq!(at(13), Some((3, 1)));
+        assert_eq!(at(14), Some((4, 2)));
+        assert_eq!(at(20), Some((4, 3)));
+        assert_eq!(at(25), Some((4, 3)));
+        assert_eq!(at(26), None);
+    }
+
+    #[test]
+    fn merge() {
+        let part = |path: &str| FileMapping {
+            sources: vec![SourceFile {
+                path: path.to_owned(),
+                content: Some("x".to_owned()),
+            }],
+            positions: vec![Some(SourcePos {
+                source: 0,
+                line: 1,
+                column: 1,
+            })],
+        };
+        let map = |section| MapFile {
+            section,
+            file: "m".to_owned(),
+            kind: "source map".to_owned(),
+        };
+        let mut all = SourceMapping::new(4);
+        all.add(0, map(0), part("a.ts"));
+        all.add(2, map(1), part("b.c"));
+        all.add(3, map(2), part("a.ts"));
+        assert_eq!(all.sources.len(), 2);
+        let sources: Vec<_> = all.positions.iter().map(|p| p.map(|p| p.source)).collect();
+        assert_eq!(sources, [Some(0), None, Some(1), Some(0)]);
     }
 }

@@ -28,7 +28,8 @@ pub struct Args {
     #[arg(long)]
     pub source: Option<String>,
 
-    /// Only tokens of this kind (ident, number, space, punct, other)
+    /// Only tokens of this kind (ident, number, space, punct, other); for wasm-functions only
+    /// function or data; for the wasm instruction views only this opcode, e.g. I32Const
     #[arg(long)]
     pub kind: Option<String>,
 
@@ -142,7 +143,7 @@ pub fn run(args: Args) -> Result<()> {
             let mapping = data
                 .source_mapping
                 .as_ref()
-                .context("The report has no source map. Compress with --report-source-map.")?;
+                .context("The report has no source positions. Compress with --report-source-map, or give wasm files debug info.")?;
             Some(match s.parse::<usize>() {
                 Ok(i) if i < mapping.sources.len() => i,
                 _ => mapping
@@ -155,7 +156,7 @@ pub fn run(args: Args) -> Result<()> {
     };
     if matches!(args.view, View::Sources | View::SourceLines) && data.source_mapping.is_none() {
         bail!(
-            "The {} view needs a source map. Compress with --report-source-map.",
+            "The {} view needs source positions. Compress with --report-source-map, or give wasm files debug info (--report-wasm-debug).",
             args.view.name()
         );
     }

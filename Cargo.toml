@@ -11,12 +11,14 @@ bitflags = "2.10.0"
 brotli = "9.0.0"
 bytes = "1.11.0"
 clap = { version="4.5.54", features = ["derive"] }
+gimli = { version = "0.34.0", default-features = false, features = ["read", "std"] }
 handlebars = "6.4.0"
 human-panic = "2.0.6"
 serde = { version="1.0.228", features=["derive"] }
 serde_json = "1.0.149"
 tracing = "0.1.44"
 tracing-subscriber = { version="0.3.22", features = ["fmt", "env-filter"] }
+wasmparser = { version = "0.262.0", default-features = false, features = ["std"] }
 zopfli = { version = "0.8", default-features = false, features = ["std"] }
 
 [dev-dependencies]

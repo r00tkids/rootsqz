@@ -14,7 +14,10 @@ use crate::{
         Encoder,
     },
     report::{
-        is_text, source_map::SourceMapping, ReportData, ReportOptions, Section, View, REPORT_DIR,
+        is_text,
+        source_map::{FileMapping, MapFile, SourceMapping},
+        wasm::{self, WasmDebug},
+        ReportData, ReportOptions, Section, View, REPORT_DIR,
     },
 };
 use output_generator::{render_output, BundledFile, Loader, OutputGenerationOptions};
@@ -67,6 +70,13 @@ pub struct Args {
     /// FILE is the path as given with --js-main or --file. Can be given multiple times.
     #[arg(long, value_name = "FILE=LABEL", value_parser = parse_label)]
     pub report_label: Vec<(String, String)>,
+
+    /// Debug info of a wasm file given with --file, to name its functions and tell which source
+    /// lines its bytes come from (implies --report). DEBUG is the wasm file before stripping, with
+    /// its name section, or a wasm source map (.wasm.map). Can be given multiple times.
+    /// Without it, x.debug.wasm and x.wasm.map next to x.wasm are used if they exist
+    #[arg(long, value_name = "FILE=DEBUG", value_parser = parse_label)]
+    pub report_wasm_debug: Vec<(String, String)>,
 
     /// Compression model config JSON (uses the embedded default when omitted)
     #[arg(long)]
@@ -167,6 +177,7 @@ impl Args {
             || !self.report_detail.is_empty()
             || self.report_source_map.is_some()
             || !self.report_label.is_empty()
+            || !self.report_wasm_debug.is_empty()
     }
 }
 
@@ -174,6 +185,83 @@ fn parse_label(s: &str) -> Result<(String, String), String> {
     s.split_once('=')
         .map(|(file, label)| (file.to_owned(), label.to_owned()))
         .ok_or_else(|| "expected FILE=LABEL".to_owned())
+}
+
+/// Source positions of the stream and the debug info of its wasm files, for the report.
+fn report_debug_info(
+    args: &Args,
+    main_js_bytes: &[u8],
+) -> Result<(Option<SourceMapping>, Vec<WasmDebug>)> {
+    let mut parts: Vec<(usize, MapFile, FileMapping)> = Vec::new();
+    if let Some(path) = &args.report_source_map {
+        parts.push((
+            0,
+            MapFile {
+                section: 0,
+                file: path.display().to_string(),
+                kind: "source map".to_owned(),
+            },
+            FileMapping::read(path, main_js_bytes)?,
+        ));
+    }
+    let mut wasm_debug = Vec::new();
+    let mut start = main_js_bytes.len();
+    for (i, file) in args.files.iter().enumerate() {
+        let section = i + 1;
+        let bytes =
+            std::fs::read(file).with_context(|| format!("Failed to read additional file: {file}"))?;
+        let given: Vec<PathBuf> = args
+            .report_wasm_debug
+            .iter()
+            .filter(|(f, _)| f == file)
+            .map(|(_, debug)| PathBuf::from(debug))
+            .collect();
+        if wasm::is_wasm(&bytes) {
+            let strict = !given.is_empty();
+            let debug_files = if strict {
+                given
+            } else {
+                wasm::discover_debug_files(Path::new(file))
+            };
+            match wasm::debug_info(section, &bytes, &debug_files, strict) {
+                Ok((debug, mappings)) => {
+                    for (map_file, kind, mapping) in mappings {
+                        parts.push((
+                            start,
+                            MapFile {
+                                section,
+                                file: map_file,
+                                kind,
+                            },
+                            mapping,
+                        ));
+                    }
+                    if !debug.files.is_empty() || !debug.notes.is_empty() {
+                        for note in &debug.notes {
+                            println!("Report: {file}: {note}");
+                        }
+                        wasm_debug.push(debug);
+                    }
+                }
+                Err(err) if strict => {
+                    return Err(err.context(format!("--report-wasm-debug for {file}")))
+                }
+                // Not a module that wasmparser reads: the report shows it as a binary file.
+                Err(_) => {}
+            }
+        } else if !given.is_empty() {
+            bail!("--report-wasm-debug: '{file}' is not a WebAssembly file");
+        }
+        start += bytes.len();
+    }
+    if parts.is_empty() {
+        return Ok((None, wasm_debug));
+    }
+    let mut mapping = SourceMapping::new(start);
+    for (offset, map, part) in parts {
+        mapping.add(offset, map, part);
+    }
+    Ok((Some(mapping), wasm_debug))
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -242,9 +330,15 @@ pub fn run(args: Args) -> Result<()> {
             bail!("--report-label: '{file}' is not given with --js-main, --file or --pre-compressed-file");
         }
     }
-    let source_mapping = match &args.report_source_map {
-        Some(path) => Some(SourceMapping::read(path, &main_js_bytes)?),
-        None => None,
+    for (file, _) in &args.report_wasm_debug {
+        if !args.files.contains(file) {
+            bail!("--report-wasm-debug: '{file}' is not given with --file");
+        }
+    }
+    let (source_mapping, wasm_debug) = if args.wants_report() {
+        report_debug_info(&args, &main_js_bytes)?
+    } else {
+        (None, Vec::new())
     };
 
     println!(
@@ -359,6 +453,7 @@ pub fn run(args: Args) -> Result<()> {
             outputs,
             recording,
             source_mapping,
+            wasm_debug,
         }
         .write(
             &report_dir,

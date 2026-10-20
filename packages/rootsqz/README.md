@@ -50,7 +50,8 @@ await compress({
     sizeProfile: '64k',
 
     /**
-     * Write a compression report to out/report. reportModels and reportDetail add detail.
+     * Write a compression report to out/report. reportModels and reportDetail add detail,
+     * reportSourceMap, reportLabels and reportWasmDebug ({ 'x.wasm': 'x.debug.wasm' }) add names.
      */
     report: true,
 

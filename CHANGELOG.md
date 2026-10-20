@@ -6,6 +6,13 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Added
+- The report parses WebAssembly files given with `--file` or imported with the plugin. The views `wasm-sections`, `wasm-functions`, `wasm-instructions` and `wasm-opcode-totals` show what each section, function, data segment and opcode costs, and `hotspots` and `bytes` name the function and instruction of each row. Suggestions point out custom sections of tools left in the file, padded LEB128 numbers, and the most expensive functions. `report.html` has a Wasm tab and names the function and instruction of each byte.
+- `--report-wasm-debug <FILE>=<DEBUG>` gives the report the debug info of a wasm file: the file before stripping, for function names, or a wasm source map (`.wasm.map`), for source lines. Without it, the report uses `x.debug.wasm` and `x.wasm.map` next to `x.wasm`, and a name section left in the file. Functions whose code differs from the debug file get no names. The Node API and the plugin have the option `reportWasmDebug`; the plugin also looks next to the imported files.
+
+### Changed
+- The views `sources` and `source-lines`, `--source` and the Sources view of `report.html` cover every mapped file, not only the main JavaScript. Reports written by earlier versions cannot be read; compress again.
+
 ## [0.8.0] - 2026-10-20
 
 ### Added

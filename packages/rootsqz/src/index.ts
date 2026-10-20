@@ -239,6 +239,14 @@ export type CompressOptions = RunOptions & {
   reportLabels?: Record<string, string>;
 
   /**
+   * Debug info of WebAssembly files in `files`, by their path as given there
+   * (`--report-wasm-debug <file>=<debug>`): the unstripped `.wasm` for function names, or a
+   * `.wasm.map` source map for source lines. Implies `report`. Without it, the report
+   * looks for `x.debug.wasm` and `x.wasm.map` next to `x.wasm`.
+   */
+  reportWasmDebug?: Record<string, string | string[]>;
+
+  /**
    * Loader shown while the web output decompresses (`--loader`, `--loader-html`, `--loader-js`, `--loader-keep`).
    */
   loader?: LoaderOptions;
@@ -255,7 +263,8 @@ function wantsReport(options: CompressOptions): boolean {
       options.reportModels ||
       options.reportDetail?.length ||
       options.reportSourceMap ||
-      Object.keys(options.reportLabels ?? {}).length,
+      Object.keys(options.reportLabels ?? {}).length ||
+      Object.keys(options.reportWasmDebug ?? {}).length,
   );
 }
 
@@ -318,6 +327,11 @@ export function compressArgs(options: CompressOptions): string[] {
   }
   for (const [file, label] of Object.entries(options.reportLabels ?? {})) {
     args.push("--report-label", `${file}=${label}`);
+  }
+  for (const [file, debug] of Object.entries(options.reportWasmDebug ?? {})) {
+    for (const d of Array.isArray(debug) ? debug : [debug]) {
+      args.push("--report-wasm-debug", `${file}=${d}`);
+    }
   }
   args.push(...(options.extraArgs ?? []));
 

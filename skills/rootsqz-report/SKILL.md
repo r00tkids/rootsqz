@@ -23,7 +23,9 @@ Command line: add `--report` to the `rootsqz` command; the report is written to 
 rootsqz -j main.js -f shader.glsl -o out --report --report-source-map main.js.map
 ```
 
-Node API (`@r00tkids/rootsqz`): the options `report`, `reportSourceMap`, `reportLabels`, `reportModels` and `reportDetail`.
+Node API (`@r00tkids/rootsqz`): the options `report`, `reportSourceMap`, `reportLabels`, `reportWasmDebug`, `reportModels` and `reportDetail`.
+
+WebAssembly files: the report parses them by itself. To name their functions and map them to source lines, it needs debug info, which the shipped file usually has not: put the file before stripping next to it as `x.debug.wasm`, or a wasm source map as `x.wasm.map`, or name it with `reportWasmDebug: { "src/x.wasm": "build/x.full.wasm" }` / `--report-wasm-debug x.wasm=x.full.wasm`. To get one, build the wasm again without stripping (e.g. keep `-g`, or leave out `wasm-strip` / `--strip-debug`).
 
 More options (plugin option / command line option):
 - `reportModels` / `--report-models`: also record what every submodel of the model predicted, to compare and tune a model config (`--config`). It needs 32 bytes of memory and disk per input byte and submodel.
@@ -43,6 +45,7 @@ Start with `report.json` in the report directory. Its `about` entry explains the
 - `suggestions`: candidates worth looking into, each with a `query` for `rootsqz report`.
 - `top`: the most expensive hotspots, identifiers, numbers and repeated strings, and blocks of binary files.
 - `models` (with `reportModels`): what each submodel alone would have cost.
+- `wasm` (with WebAssembly files): per wasm file its sections, most expensive functions and data segments, opcodes, and padded LEB128 numbers. `wasm_debug` tells where names and source lines came from.
 
 Do not read `report.html` (a viewer for people that embeds all the data), `data.bin` or `sources.json` (raw data for `rootsqz report`).
 
@@ -63,6 +66,9 @@ rootsqz report dist/rootsqz-output --view repeats --top 20              # string
 rootsqz report dist/rootsqz-output --view sections
 rootsqz report dist/rootsqz-output --view tokens --range 1200..1400     # what is at these offsets
 rootsqz report dist/rootsqz-output --view bits --range 1200..1201 --models
+rootsqz report dist/rootsqz-output --view wasm-functions --top 20       # wasm functions and data segments
+rootsqz report dist/rootsqz-output --view wasm-instructions --range 3400..3500
+rootsqz report dist/rootsqz-output --view wasm-opcode-totals --top 20
 ```
 
 `rootsqz report --help` lists all views and filters (`--section`, `--source`, `--range`, `--kind`, `--sort`, `--top`, `--min-bits`, `--models`). Offsets are byte offsets in the decompressed stream, which is the main JavaScript followed by each packed file. The `source` and `source_line` columns name the original file and line of the first byte of a row.
@@ -80,4 +86,5 @@ Changes that often pay off:
 - Number literals with many digits cost bits for each digit. Use fewer digits where the precision does not show.
 - A string that occurred before is cheap, but its first occurrence is not. Write similar code the same way, e.g. the same names and the same order of arguments and fields.
 - A packed file that costs more than 8 bits per byte is already compressed: pack it as it is (`&pre-compressed` with the plugin, `--pre-compressed-file` on the command line).
+- WebAssembly: strip custom sections of tools (`name`, `producers`, `.debug_*`) but keep those the intro reads with `WebAssembly.Module.customSections`. Optimize with `wasm-opt -Oz`, which also writes LEB128 numbers without padding. Look at expensive functions with `wasm-instructions`; constants (`F32Const`, `I32Const`) and large data segments are often the place to start.
 - With `reportModels`, `models` and the `--models` columns show which submodels help, to tune a custom model config.

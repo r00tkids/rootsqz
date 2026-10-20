@@ -6,6 +6,7 @@ use super::{
     query::{Filter, Sort},
     source_map::SourcePos,
     table::{escape, Cell, Table},
+    wasm::{ItemKind, WasmDebug, WasmModule},
     ReportData, Section,
 };
 use crate::compressor::compress_config::ModelConfig;
@@ -35,12 +36,20 @@ pub enum View {
     Repeats,
     /// One row per submodel: what it alone would have cost (needs --report-models)
     Models,
-    /// One row per original source file of the main JavaScript (needs --report-source-map)
+    /// One row per original source file (needs a source map or wasm debug info)
     Sources,
-    /// One row per line of an original source file (needs --report-source-map)
+    /// One row per line of an original source file (needs a source map or wasm debug info)
     SourceLines,
     /// Candidates worth looking into
     Suggestions,
+    /// One row per section of each wasm file
+    WasmSections,
+    /// One row per function and data segment of each wasm file
+    WasmFunctions,
+    /// One row per instruction of each wasm file
+    WasmInstructions,
+    /// Wasm instructions grouped by opcode
+    WasmOpcodeTotals,
 }
 
 impl View {
@@ -60,6 +69,10 @@ impl View {
             View::Sources => "sources",
             View::SourceLines => "source-lines",
             View::Suggestions => "suggestions",
+            View::WasmSections => "wasm-sections",
+            View::WasmFunctions => "wasm-functions",
+            View::WasmInstructions => "wasm-instructions",
+            View::WasmOpcodeTotals => "wasm-opcode-totals",
         }
     }
 
@@ -76,13 +89,17 @@ impl View {
             View::Bits => "one row per bit: the bit, the predicted p(1) and its cost; bit 0 is the most significant",
             View::Repeats => "byte strings of 8 or more bytes that occurred before, with what they cost again",
             View::Models => "one row per submodel: bits it alone would have cost, and for how many bytes it was the best",
-            View::Sources => "one row per original source file of the main JavaScript: the bytes of the main JavaScript that come from it and their cost (needs --report-source-map)",
-            View::SourceLines => "one row per line of an original source file: the bytes of the main JavaScript that come from it and their cost (needs --report-source-map)",
+            View::Sources => "one row per original source file: the bytes of the stream that come from it and their cost (needs --report-source-map for the main JavaScript, debug info for wasm files)",
+            View::SourceLines => "one row per line of an original source file: the bytes of the stream that come from it and their cost (needs --report-source-map or wasm debug info)",
             View::Suggestions => "candidates worth looking into, largest cost first",
+            View::WasmSections => "one row per section of each wasm file (type, import, code, data, custom sections such as name), with the bytes that the LEB128 size uses more than needed",
+            View::WasmFunctions => "one row per function and data segment of each wasm file (--kind function or data), with its name if known",
+            View::WasmInstructions => "one row per instruction of the wasm functions (--kind <opcode>, e.g. I32Const), with its function and the bytes its LEB128 immediates use more than needed",
+            View::WasmOpcodeTotals => "wasm instructions grouped by opcode: count and total cost",
         }
     }
 
-    pub const ALL: [View; 14] = [
+    pub const ALL: [View; 18] = [
         View::Summary,
         View::Sections,
         View::Lines,
@@ -97,6 +114,10 @@ impl View {
         View::Sources,
         View::SourceLines,
         View::Suggestions,
+        View::WasmSections,
+        View::WasmFunctions,
+        View::WasmInstructions,
+        View::WasmOpcodeTotals,
     ];
 }
 
@@ -198,6 +219,8 @@ pub struct Analysis<'a> {
     /// Offsets of the line starts of each text section (empty for binary sections).
     line_starts: Vec<Vec<usize>>,
     tokens: Vec<Vec<(usize, usize, TokenKind)>>,
+    /// The structure of each section that is a wasm file.
+    wasm: Vec<Option<WasmModule>>,
 }
 
 impl<'a> Analysis<'a> {
@@ -221,7 +244,14 @@ impl<'a> Analysis<'a> {
 
         let mut line_starts = Vec::new();
         let mut tokens = Vec::new();
+        let mut wasm = Vec::new();
         for s in &data.sections {
+            let bytes = &r.input[s.start..s.end()];
+            wasm.push(
+                (!s.text && super::wasm::is_wasm(bytes))
+                    .then(|| WasmModule::parse(bytes).ok())
+                    .flatten(),
+            );
             let bytes = &r.input[s.start..s.end()];
             if s.text {
                 let mut starts = vec![s.start];
@@ -247,6 +277,76 @@ impl<'a> Analysis<'a> {
             model_byte_costs,
             line_starts,
             tokens,
+            wasm,
+        }
+    }
+
+    /// Debug info of a wasm section, if there is some.
+    fn wasm_debug(&self, section: usize) -> Option<&WasmDebug> {
+        self.data.wasm_debug.iter().find(|d| d.section == section)
+    }
+
+    /// A function or data segment, e.g. `function 3 render`.
+    fn item_label(&self, section: usize, item: usize) -> String {
+        let module = self.wasm[section].as_ref().unwrap();
+        let it = &module.items[item];
+        let names = match (self.wasm_debug(section), it.kind) {
+            (Some(d), ItemKind::Function) => &d.function_names,
+            (Some(d), ItemKind::Data) => &d.data_names,
+            (None, ItemKind::Function) => &module.function_names,
+            (None, ItemKind::Data) => &module.data_names,
+        };
+        match names.get(&it.index) {
+            Some(name) => format!("{} {} {name}", it.kind.name(), it.index),
+            None => format!("{} {}", it.kind.name(), it.index),
+        }
+    }
+
+    /// The function or data segment (or else the section) and the instruction at `offset` of a
+    /// wasm section.
+    fn wasm_place(&self, section: usize, offset: usize) -> Option<(String, String)> {
+        let module = self.wasm[section].as_ref()?;
+        let local = offset - self.data.sections[section].start;
+        let item = match module.item_at(local) {
+            Some(i) => self.item_label(section, i),
+            None => match module.section_at(local) {
+                Some(s) if s.custom => format!("custom section {}", s.name),
+                Some(s) => format!("{} section", s.name),
+                None => "header".to_owned(),
+            },
+        };
+        let instruction = module
+            .instruction_at(local)
+            .map_or(String::new(), |i| format!("{} {}", i.op, i.operands).trim().to_owned());
+        Some((item, instruction))
+    }
+
+    fn has_wasm(&self) -> bool {
+        self.wasm.iter().any(Option::is_some)
+    }
+
+    fn wasm_cells(&self, unit: &Unit) -> Vec<Cell> {
+        if !self.has_wasm() {
+            return Vec::new();
+        }
+        match self.wasm_place(unit.section, unit.start) {
+            Some((item, instruction)) => vec![
+                item.into(),
+                if instruction.is_empty() {
+                    Cell::Empty
+                } else {
+                    instruction.into()
+                },
+            ],
+            None => vec![Cell::Empty, Cell::Empty],
+        }
+    }
+
+    fn wasm_columns(&self) -> &'static [&'static str] {
+        if self.has_wasm() {
+            &["wasm_item", "wasm_instruction"]
+        } else {
+            &[]
         }
     }
 
@@ -444,7 +544,10 @@ impl<'a> Analysis<'a> {
         let s = &self.data.sections[unit.section];
         match self.line_col(unit.section, unit.start) {
             Some((line, col)) => format!("{}:{line}:{col}", s.name()),
-            None => format!("{} +{}", s.name(), unit.start - s.start),
+            None => match self.wasm_place(unit.section, unit.start) {
+                Some((item, _)) => format!("{} +{} ({item})", s.name(), unit.start - s.start),
+                None => format!("{} +{}", s.name(), unit.start - s.start),
+            },
         }
     }
 
@@ -574,11 +677,12 @@ impl<'a> Analysis<'a> {
             View::Hotspots => (
                 self.unit_table(
                     filter,
-                    &["line", "column", "text"],
+                    &[&["line", "column", "text"], self.wasm_columns()].concat(),
                     self.hotspots(filter),
                     |u| {
                         let mut cells = self.line_col_cells(u);
                         cells.push(self.snippet(u).into());
+                        cells.extend(self.wasm_cells(u));
                         cells
                     },
                 ),
@@ -617,12 +721,18 @@ impl<'a> Analysis<'a> {
                     .filter(|u| Self::in_range(filter, u.start, u.end))
                     .collect();
                 (
-                    self.unit_table(filter, &["line", "column", "byte", "char"], units, |u| {
-                        let mut cells = self.line_col_cells(u);
-                        cells.push(format!("{:02x}", input[u.start]).into());
-                        cells.push(escape(&input[u.start..u.end], 1).into());
-                        cells
-                    }),
+                    self.unit_table(
+                        filter,
+                        &[&["line", "column", "byte", "char"], self.wasm_columns()].concat(),
+                        units,
+                        |u| {
+                            let mut cells = self.line_col_cells(u);
+                            cells.push(format!("{:02x}", input[u.start]).into());
+                            cells.push(escape(&input[u.start..u.end], 1).into());
+                            cells.extend(self.wasm_cells(u));
+                            cells
+                        },
+                    ),
                     Sort::Offset,
                 )
             }
@@ -632,6 +742,10 @@ impl<'a> Analysis<'a> {
             View::Sources => (self.sources_table(filter, false), Sort::Bits),
             View::SourceLines => (self.sources_table(filter, true), Sort::Offset),
             View::Suggestions => (self.suggestions_table(), Sort::Bits),
+            View::WasmSections => (self.wasm_sections_table(filter), Sort::Offset),
+            View::WasmFunctions => (self.wasm_functions_table(filter), Sort::Offset),
+            View::WasmInstructions => (self.wasm_instructions_table(filter), Sort::Offset),
+            View::WasmOpcodeTotals => (self.wasm_opcode_totals(filter), Sort::Bits),
         };
 
         if let Some(min) = filter.min_bits {
@@ -664,6 +778,7 @@ impl<'a> Analysis<'a> {
             "label",
             "kind",
             "text",
+            "wasm",
             "start",
             "end",
             "length",
@@ -688,6 +803,7 @@ impl<'a> Analysis<'a> {
                 s.label.as_deref().map_or(Cell::Empty, Cell::from),
                 s.kind.as_str().into(),
                 Cell::Bool(s.text),
+                Cell::Bool(self.wasm[i].is_some()),
                 s.start.into(),
                 s.end().into(),
                 s.length.into(),
@@ -740,12 +856,13 @@ impl<'a> Analysis<'a> {
         // Key: source index (u32::MAX for unmapped bytes) and line (0 for whole files).
         let mut totals: std::collections::BTreeMap<(u32, u32), (usize, f64, usize)> =
             Default::default();
-        let main = &self.data.sections[0];
-        if filter.section.map_or(false, |s| s != 0) {
-            return table;
-        }
         let total_bits: f64 = self.byte_costs.iter().sum();
-        for o in main.start..main.end() {
+        let mapped: Vec<usize> = mapping.maps.iter().map(|m| m.section).collect();
+        let offsets = self
+            .sections_in(filter)
+            .filter(|(i, _)| mapped.contains(i))
+            .flat_map(|(_, s)| s.start..s.end());
+        for o in offsets {
             if !Self::in_range(filter, o, o + 1) {
                 continue;
             }
@@ -806,6 +923,202 @@ impl<'a> Analysis<'a> {
             }
         }
         table
+    }
+
+    /// The wasm sections in the filter, with their module.
+    fn wasm_in(&self, filter: &Filter) -> impl Iterator<Item = (usize, &Section, &WasmModule)> {
+        self.sections_in(filter)
+            .filter_map(|(i, s)| self.wasm[i].as_ref().map(|m| (i, s, m)))
+    }
+
+    fn wasm_sections_table(&self, filter: &Filter) -> Table {
+        let mut units = Vec::new();
+        let mut info = HashMap::new();
+        for (i, s, module) in self.wasm_in(filter) {
+            for ws in &module.sections {
+                let unit = Unit {
+                    section: i,
+                    start: s.start + ws.start,
+                    end: s.start + ws.end,
+                };
+                info.insert(unit.start, ws);
+                units.push(unit);
+            }
+        }
+        self.unit_table(filter, &["kind", "name", "padding"], units, |u| {
+            let ws = info[&u.start];
+            vec![
+                if ws.custom { "custom" } else { "standard" }.into(),
+                ws.name.as_str().into(),
+                ws.padding.into(),
+            ]
+        })
+    }
+
+    fn wasm_functions_table(&self, filter: &Filter) -> Table {
+        let mut units = Vec::new();
+        let mut info = HashMap::new();
+        for (i, s, module) in self.wasm_in(filter) {
+            for (k, item) in module.items.iter().enumerate() {
+                if filter.kind.as_deref().is_some_and(|kind| kind != item.kind.name()) {
+                    continue;
+                }
+                let unit = Unit {
+                    section: i,
+                    start: s.start + item.start,
+                    end: s.start + item.end,
+                };
+                let instructions = module.instructions.iter().filter(|x| x.item == k);
+                let (count, padding) =
+                    instructions.fold((0, item.padding), |(c, p), x| (c + 1, p + x.padding));
+                info.insert(unit.start, (k, count, padding));
+                units.push(unit);
+            }
+        }
+        self.unit_table(
+            filter,
+            &["kind", "index", "name", "instructions", "padding"],
+            units,
+            |u| {
+                let (k, count, padding) = info[&u.start];
+                let module = self.wasm[u.section].as_ref().unwrap();
+                let item = &module.items[k];
+                let label = self.item_label(u.section, k);
+                let name = label.splitn(3, ' ').nth(2).map_or(Cell::Empty, Cell::from);
+                vec![
+                    item.kind.name().into(),
+                    (item.index as usize).into(),
+                    name,
+                    if item.kind == ItemKind::Function {
+                        count.into()
+                    } else {
+                        Cell::Empty
+                    },
+                    padding.into(),
+                ]
+            },
+        )
+    }
+
+    fn wasm_instruction_units(&self, filter: &Filter) -> Vec<(Unit, &super::wasm::Instruction)> {
+        let mut units = Vec::new();
+        for (i, s, module) in self.wasm_in(filter) {
+            for ins in &module.instructions {
+                if filter
+                    .kind
+                    .as_deref()
+                    .is_some_and(|k| !k.eq_ignore_ascii_case(&ins.op))
+                {
+                    continue;
+                }
+                units.push((
+                    Unit {
+                        section: i,
+                        start: s.start + ins.start,
+                        end: s.start + ins.end,
+                    },
+                    ins,
+                ));
+            }
+        }
+        units
+    }
+
+    fn wasm_instructions_table(&self, filter: &Filter) -> Table {
+        let units = self.wasm_instruction_units(filter);
+        let info: HashMap<usize, &super::wasm::Instruction> =
+            units.iter().map(|(u, ins)| (u.start, *ins)).collect();
+        self.unit_table(
+            filter,
+            &["item", "opcode", "operands", "padding", "hex"],
+            units.into_iter().map(|(u, _)| u).collect(),
+            |u| {
+                let ins = info[&u.start];
+                let hex: String = self.input()[u.start..u.end]
+                    .iter()
+                    .take(24)
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                vec![
+                    self.item_label(u.section, ins.item).into(),
+                    ins.op.as_str().into(),
+                    if ins.operands.is_empty() {
+                        Cell::Empty
+                    } else {
+                        ins.operands.as_str().into()
+                    },
+                    ins.padding.into(),
+                    hex.into(),
+                ]
+            },
+        )
+    }
+
+    fn wasm_opcode_totals(&self, filter: &Filter) -> Table {
+        struct Total {
+            count: usize,
+            length: usize,
+            bits: f64,
+            padding: usize,
+            first: usize,
+        }
+        let mut totals: HashMap<&str, Total> = HashMap::new();
+        for (u, ins) in self.wasm_instruction_units(filter) {
+            if !Self::in_range(filter, u.start, u.end) {
+                continue;
+            }
+            let t = totals.entry(ins.op.as_str()).or_insert(Total {
+                count: 0,
+                length: 0,
+                bits: 0.,
+                padding: 0,
+                first: u.start,
+            });
+            t.count += 1;
+            t.length += u.end - u.start;
+            t.bits += self.cost(u.start, u.end);
+            t.padding += ins.padding;
+        }
+        let mut table = Table::new(&[
+            "opcode",
+            "count",
+            "length",
+            "bits",
+            "bits_per_occurrence",
+            "bits_per_byte",
+            "padding",
+            "first_start",
+        ]);
+        let mut entries: Vec<_> = totals.into_iter().collect();
+        entries.sort_by_key(|(_, t)| t.first);
+        for (op, t) in entries {
+            table.push(vec![
+                op.into(),
+                t.count.into(),
+                t.length.into(),
+                Cell::bits(t.bits),
+                Cell::bits(t.bits / t.count as f64),
+                Cell::Float(t.bits / t.length.max(1) as f64, 3),
+                t.padding.into(),
+                t.first.into(),
+            ]);
+        }
+        table
+    }
+
+    /// Padding of the LEB128 numbers of a wasm section: count, bytes and their cost in bits.
+    fn wasm_padding(&self, section: usize) -> (usize, usize, f64) {
+        let Some(module) = &self.wasm[section] else {
+            return (0, 0, 0.);
+        };
+        let start = self.data.sections[section].start;
+        module.padded.iter().fold((0, 0, 0.), |(n, b, bits), r| {
+            (
+                n + 1,
+                b + r.len(),
+                bits + self.cost(start + r.start, start + r.end),
+            )
+        })
     }
 
     fn token_totals(&self, filter: &Filter) -> Table {
@@ -1154,6 +1467,8 @@ impl<'a> Analysis<'a> {
                     "--view {} --range {}..{}",
                     if self.data.sections[unit.section].text {
                         "tokens"
+                    } else if self.wasm[unit.section].is_some() {
+                        "wasm-instructions"
                     } else {
                         "bytes"
                     },
@@ -1161,6 +1476,98 @@ impl<'a> Analysis<'a> {
                     unit.end
                 ),
             );
+        }
+
+        // Wasm files: custom sections, padded LEB128 numbers, the most expensive functions.
+        for (i, s, module) in self.wasm_in(&Filter::default()) {
+            // Only sections of compilers and tools: others may be read by the intro, with
+            // WebAssembly.Module.customSections.
+            let custom: Vec<_> = module
+                .sections
+                .iter()
+                .filter(|w| w.custom && is_tool_section(&w.name))
+                .collect();
+            if !custom.is_empty() {
+                let bits: f64 = custom
+                    .iter()
+                    .map(|w| self.cost(s.start + w.start, s.start + w.end))
+                    .sum();
+                let list: Vec<String> = custom
+                    .iter()
+                    .map(|w| format!("{} ({} bytes)", w.name, w.end - w.start))
+                    .collect();
+                add(
+                    "wasm-custom",
+                    bits,
+                    Some((s.start + custom[0].start, s.start + custom[custom.len() - 1].end)),
+                    format!(
+                        "'{}' has custom sections of compilers and tools, which it does not need to run: {}. They cost {:.1} bytes. Strip them, e.g. with `wasm-opt --strip-debug --strip-producers --strip-target-features` (`wasm-strip` removes all custom sections, also those the intro reads), and give the unstripped file to the report with --report-wasm-debug.",
+                        s.name(),
+                        list.join(", "),
+                        bits / 8.
+                    ),
+                    format!("--view wasm-sections --section {i}"),
+                );
+            }
+
+            let (count, bytes, bits) = self.wasm_padding(i);
+            if bytes > 0 {
+                add(
+                    "wasm-leb",
+                    bits,
+                    None,
+                    format!(
+                        "{count} LEB128 numbers in '{}' are longer than needed: {bytes} bytes of padding cost {:.1} bytes. wasm-ld pads relocated numbers, such as function indices of calls; optimizing with wasm-opt (e.g. -Oz) writes them as short as possible.",
+                        s.name(),
+                        bits / 8.
+                    ),
+                    format!("--view wasm-functions --section {i} --sort bits"),
+                );
+            }
+
+            let file_bits = self.cost(s.start, s.end());
+            let mut items: Vec<(usize, f64)> = module
+                .items
+                .iter()
+                .enumerate()
+                .map(|(k, it)| (k, self.cost(s.start + it.start, s.start + it.end)))
+                .collect();
+            items.sort_by(|a, b| b.1.total_cmp(&a.1));
+            for (k, bits) in items.into_iter().take(3) {
+                let it = &module.items[k];
+                if bits < 64. || bits < 0.05 * file_bits {
+                    continue;
+                }
+                let (start, end) = (s.start + it.start, s.start + it.end);
+                let from = self
+                    .source_place(s.start + it.body_start.min(it.end.saturating_sub(1)))
+                    .map_or(String::new(), |p| format!(", from {p}"));
+                let instructions = module.instructions.iter().filter(|x| x.item == k).count();
+                let what = if it.kind == ItemKind::Function {
+                    format!("{instructions} instructions")
+                } else {
+                    "data".to_owned()
+                };
+                add(
+                    "wasm-function",
+                    bits,
+                    Some((start, end)),
+                    format!(
+                        "{} of '{}' costs {:.1} bytes, {:.0}% of the file ({} bytes, {what}, {:.2} bits per byte{from}).",
+                        self.item_label(i, k),
+                        s.name(),
+                        bits / 8.,
+                        100. * bits / file_bits.max(1e-9),
+                        end - start,
+                        bits / (end - start).max(1) as f64,
+                    ),
+                    if it.kind == ItemKind::Function {
+                        format!("--view wasm-instructions --range {start}..{end} --top 30")
+                    } else {
+                        format!("--view bytes --range {start}..{end}")
+                    },
+                );
+            }
         }
 
         // Repetitions that the model does not predict well.
@@ -1276,7 +1683,8 @@ impl<'a> Analysis<'a> {
                 "The model predicts every bit. A bit with predicted probability p costs -log2(p) bits; bits is the sum of that over a range, cost_bytes = bits / 8. The costs add up to the size of the compressed stream, give or take a few bytes.",
                 "The model learns from all bytes before a byte, also across sections, so a byte costs less if similar bytes came before. Reordering or changing earlier bytes changes the cost of later ones.",
                 "encoded_start and encoded_end are positions in the compressed stream before and after a range was coded; arithmetic coding spreads bits over bytes, so they are approximate. Add the offset of the 'compressed stream' part in outputs to get a position in the output file.",
-                "With --report-source-map, 'sources' and 'top.source_lines' tell which original source files and lines the bytes of the main JavaScript come from, and the views of byte ranges have the columns source and source_line (of their first byte).",
+                "With --report-source-map, 'sources' and 'top.source_lines' tell which original source files and lines the bytes of the main JavaScript come from, and the views of byte ranges have the columns source and source_line (of their first byte). Debug info of wasm files (--report-wasm-debug) adds their source lines.",
+                "'wasm' describes each wasm file: its sections, most expensive functions and data segments, opcodes, and the bytes its LEB128 numbers use more than needed (padding). 'wasm_debug' tells where the names and source lines of a wasm file came from. The views wasm-sections, wasm-functions, wasm-instructions and wasm-opcode-totals have the details.",
                 "Submodel names are paths in config.model. With --report-models, 'models' tells what each submodel alone would have cost: a submodel can be useful in the mix even if it is bad alone.",
                 "More detail: 'rootsqz report <this directory> --view <view>' prints a view as tab separated rows; see 'views' and 'rootsqz report --help' for filters (--section, --range, --kind, --top, --sort, --min-bits, --models). The suggestions have such a query each.",
             ],
@@ -1293,10 +1701,12 @@ impl<'a> Analysis<'a> {
             "sections": self.sections_table(&Filter::default()).to_json(),
             "token_kinds": token_kinds,
             "source_map": self.data.source_mapping.as_ref().map(|m| json!({
-                "file": m.map_path,
+                "maps": m.maps,
                 "sources": m.sources.len(),
                 "mapped_bytes": m.positions.iter().filter(|p| p.is_some()).count(),
             })),
+            "wasm": self.wasm_summary(),
+            "wasm_debug": self.data.wasm_debug,
             "sources": self.top(View::Sources, 30, None).to_json(),
             "suggestions": self.view(View::Suggestions, &Filter { top: Some(25), ..Filter::default() }).to_json(),
             "top": {
@@ -1318,6 +1728,75 @@ impl<'a> Analysis<'a> {
         })
     }
 
+    fn wasm_summary(&self) -> Vec<Value> {
+        self.wasm_in(&Filter::default())
+            .map(|(i, s, _)| {
+                let filter = |top: usize| Filter {
+                    section: Some(i),
+                    top: Some(top),
+                    ..Filter::default()
+                };
+                let (count, bytes, bits) = self.wasm_padding(i);
+                json!({
+                    "section": i,
+                    "name": s.name(),
+                    "sections": self.view(View::WasmSections, &Filter { section: Some(i), ..Filter::default() }).to_json(),
+                    "functions": self.view(View::WasmFunctions, &filter(20)).to_json(),
+                    "opcodes": self.view(View::WasmOpcodeTotals, &filter(20)).to_json(),
+                    "padding": {
+                        "numbers": count,
+                        "bytes": bytes,
+                        "bits": (bits * 100.).round() / 100.,
+                    },
+                })
+            })
+            .collect()
+    }
+
+    /// What report.html needs to name the parts of each wasm section: offsets are in the stream.
+    pub fn wasm_html(&self) -> Vec<WasmHtml> {
+        self.wasm_in(&Filter::default())
+            .map(|(i, s, module)| {
+                let mut regions: Vec<(usize, usize, String)> = module
+                    .sections
+                    .iter()
+                    .map(|ws| {
+                        let name = if ws.custom {
+                            format!("custom section {}", ws.name)
+                        } else {
+                            format!("{} section", ws.name)
+                        };
+                        (s.start + ws.start, s.start + ws.end, name)
+                    })
+                    .collect();
+                regions.extend(module.items.iter().enumerate().map(|(k, it)| {
+                    (s.start + it.start, s.start + it.end, self.item_label(i, k))
+                }));
+                let mut opcodes: Vec<String> = Vec::new();
+                let mut index = HashMap::new();
+                let mut instructions = Vec::with_capacity(module.instructions.len());
+                for ins in &module.instructions {
+                    let op = *index.entry(ins.op.clone()).or_insert_with(|| {
+                        opcodes.push(ins.op.clone());
+                        opcodes.len() - 1
+                    });
+                    instructions.push((s.start + ins.start, op as u16, ins.operands.clone()));
+                }
+                WasmHtml {
+                    section: i,
+                    regions,
+                    opcodes,
+                    instructions,
+                    padded: module
+                        .padded
+                        .iter()
+                        .map(|r| (s.start + r.start, s.start + r.end))
+                        .collect(),
+                }
+            })
+            .collect()
+    }
+
     // Accessors for the HTML report.
     pub fn data(&self) -> &ReportData {
         self.data
@@ -1330,6 +1809,34 @@ impl<'a> Analysis<'a> {
     pub fn model_byte_costs(&self) -> &[f32] {
         &self.model_byte_costs
     }
+}
+
+/// See [`Analysis::wasm_html`].
+pub struct WasmHtml {
+    pub section: usize,
+    /// Sections, then functions and data segments: start, end, name.
+    pub regions: Vec<(usize, usize, String)>,
+    pub opcodes: Vec<String>,
+    /// Start, index into `opcodes`, operands.
+    pub instructions: Vec<(usize, u16, String)>,
+    /// Numbers longer than they need to be.
+    pub padded: Vec<(usize, usize)>,
+}
+
+/// Custom sections that compilers and tools write, not the program.
+fn is_tool_section(name: &str) -> bool {
+    matches!(
+        name,
+        "name"
+            | "producers"
+            | "target_features"
+            | "sourceMappingURL"
+            | "external_debug_info"
+            | "linking"
+            | "dylink"
+            | "dylink.0"
+    ) || name.starts_with(".debug_")
+        || name.starts_with("reloc.")
 }
 
 fn config_has(config: &ModelConfig, f: impl Fn(&ModelConfig) -> bool + Copy) -> bool {

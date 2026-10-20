@@ -11,11 +11,13 @@
   --accent: #2a62c9; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --k-hotspot: #c2410c; --k-number: #7c3aed; --k-repeat: #0f766e;
   --k-source: #15803d; --k-model: #a21caf; --k-pre-compress: #b45309;
+  --k-wasm-custom: #be123c; --k-wasm-leb: #0369a1; --k-wasm-function: #4d7c0f;
   --sel: rgba(42, 98, 201, .45); --hover: rgba(0, 0, 0, .28); --find: #fde047; --find-cur: #fb923c;
 }
 @media (prefers-color-scheme: dark) {
   :root { --k-hotspot: #fb923c; --k-number: #b794f6; --k-repeat: #2dd4bf;
     --k-source: #4ade80; --k-model: #e879f9; --k-pre-compress: #fbbf24; --mag-l: 60%;
+    --k-wasm-custom: #fb7185; --k-wasm-leb: #38bdf8; --k-wasm-function: #a3e635;
     --bg: #161615; --fg: #e8e7e3; --muted: #9a9993; --line: #33322f; --panel: #1f1f1d; --accent: #7aa7ff;
     --sel: rgba(122, 167, 255, .45); --hover: rgba(255, 255, 255, .3); }
 }
@@ -182,15 +184,17 @@ const modelCost = (o, j) => modelCosts8[o * M + j] / 16;
 const encodedPos = (() => { const s = b64(DATA.encodedSteps), p = new Uint32Array(N); let a = 0; for (let o = 0; o < N; o++) p[o] = a += s[o]; return p; })();
 const sections = S.sections;
 const nameOf = s => s.label || s.path;
-const mainEnd = sections.length ? sections[0].end : 0;
 const NONE = 0xffffffff;
 const runs = DATA.sourceRuns ? new Uint32Array(b64(DATA.sourceRuns).buffer) : new Uint32Array(0);
 const R = runs.length / 4;
 const sources = DATA.sources;
 const hasSources = sources.length > 0;
+// Sections with a source map or debug info: their bytes without a position are "not mapped".
+const mappedSections = [...new Set((S.source_map ? S.source_map.maps : []).map(m => m.section))].map(i => sections[i]);
+const inMapped = o => mappedSections.some(s => o >= s.start && o < s.end);
 function runIndex(o) {
   let lo = 0, hi = R - 1;
-  if (!R || o >= mainEnd || runs[0] > o) return -1;
+  if (!R || runs[0] > o) return -1;
   while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (runs[4 * mid] <= o) lo = mid; else hi = mid - 1; }
   return lo;
 }
@@ -227,9 +231,35 @@ const utf8Len = b => b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 
 const srcTotals = sources.map(() => ({ bytes: 0, bits: 0, first: -1 }));
 const unmapped = { bytes: 0, bits: 0, first: -1 };
 for (let i = 0; i < R; i++) {
-  const a = runs[4 * i], b = i + 1 < R ? runs[4 * i + 4] : mainEnd, src = runs[4 * i + 1];
-  const t = src === NONE ? unmapped : srcTotals[src];
-  t.bytes += b - a; t.bits += bitsIn(a, b); if (t.first < 0) t.first = a;
+  const a = runs[4 * i], b = i + 1 < R ? runs[4 * i + 4] : N, src = runs[4 * i + 1];
+  if (src !== NONE) { const t = srcTotals[src]; t.bytes += b - a; t.bits += bitsIn(a, b); if (t.first < 0) t.first = a; continue; }
+  for (const s of mappedSections) {
+    const x = Math.max(a, s.start), y = Math.min(b, s.end);
+    if (x < y) { unmapped.bytes += y - x; unmapped.bits += bitsIn(x, y); if (unmapped.first < 0 || x < unmapped.first) unmapped.first = x; }
+  }
+}
+
+// Wasm sections: their parts, instructions and padded numbers, for the tooltip.
+const wasm = (DATA.wasm || []).map(w => {
+  const ops = new Uint16Array(b64(w.ops).buffer);
+  const starts = new Uint32Array(b64(w.starts).buffer);
+  return { ...w, starts, opIndex: ops, operandList: w.operands ? w.operands.split("\n") : [] };
+});
+function wasmAt(o) {
+  const si = sectionOf(o), w = wasm.find(x => x.section === si);
+  if (!w) return null;
+  // The innermost part: a function or data segment, else its section.
+  let region = null;
+  for (const r of w.regions) if (o >= r[0] && o < r[1] && (!region || r[1] - r[0] < region[1] - region[0])) region = r;
+  let ins = null;
+  const st = w.starts;
+  if (region && st.length && st[0] <= o) {
+    let lo = 0, hi = st.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (st[mid] <= o) lo = mid; else hi = mid - 1; }
+    if (st[lo] >= region[0]) ins = (w.opcodes[w.opIndex[lo]] + " " + (w.operandList[lo] || "")).trim();
+  }
+  const padded = w.padded.some(r => o >= r[0] && o < r[1]);
+  return { region: region ? region[2] : "header", ins, padded };
 }
 
 // ---------------------------------------------------------------- state
@@ -257,9 +287,8 @@ function bucketClass(v) {
 function isFocused(o) {
   const f = state.focus;
   if (!f) return true;
-  if (o >= mainEnd) return false;
   const p = sourceAt(o);
-  return f.unmapped ? !p : !!p && p.source === f.source;
+  return f.unmapped ? !p && inMapped(o) : !!p && p.source === f.source;
 }
 // Class of n bytes at o, with dimming.
 function classAt(o, n) {
@@ -558,12 +587,17 @@ function byteTip(o, n) {
   let h = `<div><b>${esc(nameOf(s))}</b>${lc ? ` line ${lc[0]}, column ${lc[1]}` : ""}</div>`;
   h += `<div>offset ${o} (+${o - s.start} in the file) · bytes ${bytes}</div>`;
   h += `<div><b>${fmt(c, 2)}</b> bits · compressed stream at ≈ ${o ? encodedPos[o - 1] : 0}</div>`;
+  const w = wasmAt(o);
+  if (w) {
+    h += `<div>${esc(w.region)}${w.ins ? ` · <code>${esc(w.ins.slice(0, 120))}</code>` : ""}</div>`;
+    if (w.padded) h += `<div style="color:var(--k-wasm-leb)">part of a padded LEB128 number</div>`;
+  }
   const p = sourceAt(o);
   if (p) {
     const t = srcLineText(p);
     h += `<div>from <b>${esc(sources[p.source].path)}:${p.line}</b></div>`;
     if (t != null) h += `<pre>${esc(t.trim().slice(0, 300))}</pre>`;
-  } else if (o < mainEnd && hasSources) h += `<div style="color:var(--muted)">not mapped by the source map</div>`;
+  } else if (hasSources && inMapped(o)) h += `<div style="color:var(--muted)">not mapped by the source map or debug info</div>`;
   if (M) {
     const mc = names.map((_, j) => { let v = 0; for (let k = 0; k < n; k++) v += modelCost(o + k, j); return [j, v]; }).sort((a, b) => a[1] - b[1]);
     const max = Math.max(8, ...mc.map(x => x[1]));
@@ -748,7 +782,7 @@ function setView(v) {
 }
 $("vBundle").onclick = () => setView("stream");
 $("vSource").onclick = () => setView("source");
-if (!hasSources) { $("vSource").disabled = true; $("vSource").title = "Compress with --report-source-map (the plugin does it) to see the original sources"; }
+if (!hasSources) { $("vSource").disabled = true; $("vSource").title = "Compress with --report-source-map (the plugin does it), or give wasm files debug info, to see the original sources"; }
 
 // ---------------------------------------------------------------- source view
 // Per source line: bits, bytes, first generated byte, and the pieces of the line by source column.
@@ -760,7 +794,7 @@ function aggregate(si) {
   const get = l => { let x = lines.get(l); if (!x) lines.set(l, x = { bits: 0, bytes: 0, first: -1, segs: new Map(), chars: null }); return x; };
   for (let i = 0; i < R; i++) {
     if (runs[4 * i + 1] !== si) continue;
-    const a = runs[4 * i], b = i + 1 < R ? runs[4 * i + 4] : mainEnd, line = runs[4 * i + 2], col = runs[4 * i + 3];
+    const a = runs[4 * i], b = i + 1 < R ? runs[4 * i + 4] : N, line = runs[4 * i + 2], col = runs[4 * i + 3];
     const x = get(line), bits = bitsIn(a, b);
     x.bits += bits; x.bytes += b - a; if (x.first < 0 || a < x.first) x.first = a;
     if (col === 0 && mainStarts) {
@@ -787,7 +821,7 @@ function renderSource(scrollLine) {
   const text = sourceLines(si);
   let maxBits = 0;
   for (const x of agg.values()) maxBits = Math.max(maxBits, x.bits);
-  let html = `<div class="head"><b>${esc(src.path)}</b><small>${t.bytes.toLocaleString()} bytes in the main JavaScript · ${fmt(t.bits / 8)} bytes of cost · ${fmt(t.bits / Math.max(1, t.bytes), 3)} bits/byte · ${fmt(100 * t.bits / cum[N], 1)}% of the stream</small><button class="btn" id="srcFocus">Show only this in the stream</button></div>`;
+  let html = `<div class="head"><b>${esc(src.path)}</b><small>${t.bytes.toLocaleString()} bytes in the stream · ${fmt(t.bits / 8)} bytes of cost · ${fmt(t.bits / Math.max(1, t.bytes), 3)} bits/byte · ${fmt(100 * t.bits / cum[N], 1)}% of the stream</small><button class="btn" id="srcFocus">Show only this in the stream</button></div>`;
   if (!text) {
     html += `<p class="note">The source map has no content for this file. Its lines and their cost:</p>`;
     for (const [l, x] of [...agg.entries()].sort((a, b) => a[0] - b[0])) html += `<div class="sl" data-l="${l}"><span class="ln">${l}</span><span class="lb">${fmt(x.bits, 0)}</span><span class="code">${x.bytes} bytes</span></div>`;
@@ -909,9 +943,9 @@ function filesPanel(p) {
   p.appendChild(table(sections, [{ label: "file", html: r => `<code>${esc(nameOf(r))}</code>` }, num("bytes", "length", 0), num("cost", "cost_bytes"), num("bits/B", "bits_per_byte", 2)], r => goTo(r.start)));
   if (!hasSources) {
     p.appendChild(h2("Original sources"));
-    p.appendChild(note("Compress with --report-source-map to see the original sources of the main JavaScript. The plugin passes the source map by itself."));
+    p.appendChild(note("Compress with --report-source-map to see the original sources of the main JavaScript. The plugin passes the source map by itself. Wasm files get theirs from debug info: see the Wasm tab."));
   } else {
-    p.appendChild(h2("Original sources of the main JavaScript"));
+    p.appendChild(h2("Original sources"));
     p.appendChild(note("Click a file to see its code colored by cost. ◎ shows only its bytes in the stream."));
     const filter = Object.assign(document.createElement("input"), { type: "search", className: "filter", placeholder: "Filter files" });
     p.appendChild(filter);
@@ -998,6 +1032,31 @@ const panels = {
     p.appendChild(h2("Repeats that still cost"));
     p.appendChild(table(S.top.repeats, [txt("start", "start"), txt("earlier", "earlier_start"), num("bytes", "length", 0), num("bits", "bits"), code("text", "text")], go));
   },
+  "Wasm": p => {
+    p.appendChild(note("The structure of each WebAssembly file: what its sections, functions and data segments cost. Click a row to jump."));
+    const go = r => goTo(r.start ?? r.first_start, r.end ?? (r.first_start + r.length / r.count));
+    for (const w of S.wasm) {
+      p.appendChild(h2(w.name));
+      const d = S.wasm_debug.find(x => x.section === w.section);
+      const info = [];
+      if (d) {
+        for (const f of d.files) info.push(`${f.path} (${f.kind}): ${f.gave.length ? f.gave.join(", ") : "nothing"}`);
+        if (d.unmatched_functions.length) info.push(`${d.unmatched_functions.length} functions differ from the debug file and have no names or lines`);
+        info.push(...d.notes);
+      } else info.push("No debug info: pass --report-wasm-debug, or put x.debug.wasm or x.wasm.map next to x.wasm, to see names and source lines.");
+      if (w.padding.numbers) info.push(`${w.padding.numbers} LEB128 number${w.padding.numbers > 1 ? "s are" : " is"} padded by ${w.padding.bytes} bytes in all (${fmt(w.padding.bits / 8)} bytes of cost); wasm-opt writes them without padding.`);
+      for (const t of info) p.appendChild(note(t));
+      p.appendChild(table(w.sections, [{ label: "section", html: r => `<code>${esc(r.name)}</code>` }, txt("kind", "kind"), num("bytes", "length", 0), num("bits", "bits", 0), num("b/B", "bits_per_byte", 2)], go));
+      if (w.functions.length) {
+        p.appendChild(h2("Most expensive functions and data"));
+        p.appendChild(table(w.functions, [{ label: "item", html: r => `<code>${esc(r.kind + " " + r.index + (r.name ? " " + r.name : ""))}</code>` }, num("bytes", "length", 0), num("bits", "bits", 0), num("b/B", "bits_per_byte", 2), num("pad", "padding", 0)], go));
+      }
+      if (w.opcodes.length) {
+        p.appendChild(h2("Opcodes by total cost"));
+        p.appendChild(table(w.opcodes, [code("opcode", "opcode"), num("count", "count", 0), num("bits", "bits", 0), num("each", "bits_per_occurrence")], r => goTo(r.first_start, r.first_start + 1)));
+      }
+    }
+  },
   "Output": p => {
     const colors = ["#8b8", "#c96", "#69c", "#b8b", "#cb6", "#6bb"];
     for (const f of S.outputs) {
@@ -1023,7 +1082,7 @@ const panels = {
     p.appendChild(note("Hover a byte for details, click to pin them, double-click to open its original source. Find with / then Enter and Shift+Enter. Escape clears the selection. Dim hides cheap bytes. The strip on the right shows the whole stream, or the open source; click or drag it to jump. Click a file header to collapse it."));
   },
 };
-const tabOrder = ["Files", "Top", "Suggestions", "Output", "Models", "About"];
+const tabOrder = ["Files", "Top", "Suggestions", ...(S.wasm.length ? ["Wasm"] : []), "Output", "Models", "About"];
 let current = tabOrder[0];
 function showPanel(name) {
   current = name;

@@ -118,6 +118,14 @@ export type RootsqzOptions = {
   reportDetail?: ReportView[];
 
   /**
+   * Debug info of imported WebAssembly files, by the path of the imported file (relative to the
+   * working directory, or absolute): the unstripped `.wasm` for function names, or a `.wasm.map`
+   * source map for source lines (`--report-wasm-debug`). Implies `report`.
+   * Without it, the plugin uses `x.debug.wasm` and `x.wasm.map` next to an imported `x.wasm`.
+   */
+  reportWasmDebug?: Record<string, string>;
+
+  /**
    * Loader shown while the output decompresses: a built-in `preset` ("spinner", "bar" or "progress"),
    * or your own `html` and `js` files. `keep` leaves it in place when the bundle runs.
    * Paths are relative to the working directory.
@@ -172,7 +180,9 @@ export type RootsqzOptions = {
  * @throws If `brotli` is combined with `config`, a report option or the `64k` size profile.
  */
 export default function (options: RootsqzOptions = {}): Plugin {
-  const wantsReport = Boolean(options.report || options.reportModels || options.reportDetail?.length);
+  const wantsReport = Boolean(options.report || options.reportModels || options.reportDetail?.length ||
+    Object.keys(options.reportWasmDebug ?? {}).length);
+  const wasmDebug = new Map(Object.entries(options.reportWasmDebug ?? {}).map(([file, debug]) => [path.resolve(file), path.resolve(debug)]));
   if (options.brotli && (options.config || wantsReport || options.sizeProfile === "64k")) {
     throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
   }
@@ -342,6 +352,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
         const filesToCompress = [];
         const preCompressedFiles = [];
         const reportLabels: Record<string, string> = {};
+        const reportWasmDebug: Record<string, string[]> = {};
 
         // Files are registered when they're loaded, so leave out the ones whose import was tree-shaken away
         const renderedIds = new Set(
@@ -370,6 +381,21 @@ export default function (options: RootsqzOptions = {}): Plugin {
           const query = qIdx === -1 ? "" : id.slice(qIdx);
           reportLabels[path.relative(".", outPath)] =
             path.relative(".", qIdx === -1 ? id : id.slice(0, qIdx)) + query + (file.transformed ? " (transformed)" : "");
+
+          // Debug info of a wasm file: given, or next to it. The report checks that it matches.
+          const source = path.resolve(qIdx === -1 ? id : id.slice(0, qIdx));
+          const isWasm = file.content.subarray(0, 4).equals(Buffer.from("\0asm"));
+          if (wantsReport && isWasm && !file.isCompressed) {
+            const given = wasmDebug.get(source);
+            const candidates = given ? [given] : source.endsWith(".wasm")
+              ? [source.slice(0, -5) + ".debug.wasm", source + ".map"]
+              : [];
+            const found = [];
+            for (const c of candidates) {
+              if (given || await fs.stat(c).then(st => st.isFile(), () => false)) found.push(path.relative(".", c));
+            }
+            if (found.length) reportWasmDebug[path.relative(".", outPath)] = found;
+          }
 
           if (file.isCompressed) {
             preCompressedFiles.push(path.relative(".", outPath));
@@ -410,12 +436,13 @@ export default function (options: RootsqzOptions = {}): Plugin {
           sizeProfile: options.sizeProfile,
           brotli: options.brotli,
           config: options.config,
-          report: options.report,
+          report: wantsReport,
           loader: options.loader,
           reportModels: options.reportModels,
           reportDetail: options.reportDetail,
           reportSourceMap,
           reportLabels: wantsReport ? reportLabels : undefined,
+          reportWasmDebug: wantsReport ? reportWasmDebug : undefined,
           extraArgs: options.rootsqzArgs,
         });
 
