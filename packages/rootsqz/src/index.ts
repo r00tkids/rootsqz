@@ -240,8 +240,8 @@ export type CompressOptions = RunOptions & {
 
   /**
    * Debug info of WebAssembly files in `files`, by their path as given there
-   * (`--report-wasm-debug <file>=<debug>`): the unstripped `.wasm` for function names, or a
-   * `.wasm.map` source map for source lines. Implies `report`. Without it, the report
+   * (`--report-wasm-debug <file>=<debug>`): the unstripped `.wasm` for function names and
+   * DWARF source lines, or a `.wasm.map` source map. Implies `report`. Without it, the report
    * looks for `x.debug.wasm` and `x.wasm.map` next to `x.wasm`.
    */
   reportWasmDebug?: Record<string, string | string[]>;

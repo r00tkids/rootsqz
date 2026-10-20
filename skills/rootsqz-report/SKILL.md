@@ -25,7 +25,7 @@ rootsqz -j main.js -f shader.glsl -o out --report --report-source-map main.js.ma
 
 Node API (`@r00tkids/rootsqz`): the options `report`, `reportSourceMap`, `reportLabels`, `reportWasmDebug`, `reportModels` and `reportDetail`.
 
-WebAssembly files: the report parses them by itself. To name their functions and map them to source lines, it needs debug info, which the shipped file usually has not: put the file before stripping next to it as `x.debug.wasm`, or a wasm source map as `x.wasm.map`, or name it with `reportWasmDebug: { "src/x.wasm": "build/x.full.wasm" }` / `--report-wasm-debug x.wasm=x.full.wasm`. To get one, build the wasm again without stripping (e.g. keep `-g`, or leave out `wasm-strip` / `--strip-debug`).
+WebAssembly files: the report parses them by itself. To name their functions and map them to source lines, it needs debug info, which the shipped file usually has not: put the file before stripping next to it as `x.debug.wasm`, or a wasm source map as `x.wasm.map`, or name it with `reportWasmDebug: { "src/x.wasm": "build/x.full.wasm" }` / `--report-wasm-debug x.wasm=x.full.wasm`. To get one, build the wasm again without stripping, with `-g` for DWARF line info (leave out `wasm-strip` / `--strip-debug`). With line info, the `sources` and `source-lines` views and `--source` cover the wasm code too.
 
 More options (plugin option / command line option):
 - `reportModels` / `--report-models`: also record what every submodel of the model predicted, to compare and tune a model config (`--config`). It needs 32 bytes of memory and disk per input byte and submodel.

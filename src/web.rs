@@ -73,7 +73,7 @@ pub struct Args {
 
     /// Debug info of a wasm file given with --file, to name its functions and tell which source
     /// lines its bytes come from (implies --report). DEBUG is the wasm file before stripping, with
-    /// its name section, or a wasm source map (.wasm.map). Can be given multiple times.
+    /// its name section and DWARF, or a wasm source map (.wasm.map). Can be given multiple times.
     /// Without it, x.debug.wasm and x.wasm.map next to x.wasm are used if they exist
     #[arg(long, value_name = "FILE=DEBUG", value_parser = parse_label)]
     pub report_wasm_debug: Vec<(String, String)>,

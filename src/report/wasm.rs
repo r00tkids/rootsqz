@@ -1,7 +1,7 @@
 //! The structure of WebAssembly files in the compressed stream, and their debug info.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use wasmparser::{KnownCustom, Name, Parser, Payload, TypeRef};
 
-use super::source_map::FileMapping;
+use super::source_map::{resolve_source, FileMapping, SourceFile, SourcePos};
 
 pub fn is_wasm(bytes: &[u8]) -> bool {
     bytes.starts_with(b"\0asm")
@@ -494,6 +494,24 @@ pub fn debug_info(
             debug.notes.push(format!("{err:#}"));
         }
     }
+
+    // DWARF left in the file, if no debug file gave lines.
+    if mappings.is_empty() && shipped.custom.iter().any(|(n, _)| n == ".debug_line") {
+        let matched = match_functions(&shipped, bytes, &shipped, bytes);
+        match dwarf_mapping(&shipped, bytes, &shipped, bytes, &matched) {
+            Ok(Some(mapping)) => {
+                let path = "(DWARF of the file)".to_owned();
+                debug.files.push(DebugFile {
+                    path: path.clone(),
+                    kind: "shipped".to_owned(),
+                    gave: vec![lines_gave(&mapping)],
+                });
+                mappings.push((path, "dwarf".to_owned(), mapping));
+            }
+            Ok(None) => {}
+            Err(err) => debug.notes.push(format!("Failed to read the DWARF of the file: {err}")),
+        }
+    }
     debug.unmatched_functions.sort();
     debug.unmatched_functions.dedup();
     Ok((debug, mappings))
@@ -509,11 +527,10 @@ fn add_debug_file(
     let shown = path.display().to_string();
     if path.extension().is_some_and(|e| e == "map") {
         let part = FileMapping::read_wasm(path, bytes.len())?;
-        let mapped = part.positions.iter().filter(|p| p.is_some()).count();
         debug.files.push(DebugFile {
             path: shown.clone(),
             kind: "source map".to_owned(),
-            gave: vec![format!("lines of {mapped} bytes")],
+            gave: vec![lines_gave(&part)],
         });
         mappings.push((shown, "wasm source map".to_owned(), part));
         return Ok(());
@@ -547,6 +564,16 @@ fn add_debug_file(
             gave.push(format!("names of {} data segments", module.data_names.len()));
             debug.data_names.extend(module.data_names.clone());
         }
+        match dwarf_mapping(shipped, bytes, &module, &debug_bytes, &matched) {
+            Ok(Some(mapping)) => {
+                gave.push(lines_gave(&mapping));
+                mappings.push((shown.clone(), "dwarf".to_owned(), mapping));
+            }
+            Ok(None) => {}
+            Err(err) => debug
+                .notes
+                .push(format!("Failed to read the DWARF of {shown}: {err}")),
+        }
         if !unmatched.is_empty() {
             debug.notes.push(format!(
                 "{} of {} functions differ from {}, so its debug info does not apply to them: was the shipped file optimized after it, e.g. with wasm-opt?",
@@ -563,6 +590,144 @@ fn add_debug_file(
         });
     }
     Ok(())
+}
+
+fn lines_gave(mapping: &FileMapping) -> String {
+    let mapped = mapping.positions.iter().filter(|p| p.is_some()).count();
+    format!("lines of {mapped} bytes")
+}
+
+/// Source positions of the shipped file from the DWARF line info of `debug` (which can be the
+/// shipped file itself), through the functions whose code is the same. `None` without line info.
+fn dwarf_mapping(
+    shipped: &WasmModule,
+    bytes: &[u8],
+    debug: &WasmModule,
+    debug_bytes: &[u8],
+    matched: &BTreeMap<u32, Option<usize>>,
+) -> Result<Option<FileMapping>> {
+    let Some(code_start) = debug.code_start else {
+        return Ok(None);
+    };
+    let rows = dwarf_lines(debug, debug_bytes)?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    // Matched function bodies: start and end in the debug file's code addresses, shipped start.
+    let mut bodies: Vec<(u64, u64, usize)> = shipped
+        .items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Function)
+        .filter_map(|item| {
+            let start = (*matched.get(&item.index)?)?;
+            let address = (start - code_start) as u64;
+            Some((address, address + (item.end - item.body_start) as u64, item.body_start))
+        })
+        .collect();
+    bodies.sort();
+
+    let cwd = std::env::current_dir().ok();
+    let mut sources: Vec<SourceFile> = Vec::new();
+    let mut source_index: HashMap<String, u32> = HashMap::new();
+    let mut positions = vec![None; bytes.len()];
+    for row in rows {
+        let k = bodies.partition_point(|b| b.1 <= row.start);
+        let Some(&(body_start, body_end, shipped_start)) = bodies.get(k) else {
+            continue;
+        };
+        let (start, end) = (row.start.max(body_start), row.end.min(body_end));
+        if start >= end {
+            continue;
+        }
+        let source = *source_index.entry(row.file.clone()).or_insert_with(|| {
+            sources.push(SourceFile {
+                path: resolve_source(&row.file, None, Path::new(""), cwd.as_deref()),
+                content: None,
+            });
+            sources.len() as u32 - 1
+        });
+        let at = |a: u64| shipped_start + (a - body_start) as usize;
+        positions[at(start)..at(end)].fill(Some(SourcePos {
+            source,
+            line: row.line,
+            column: row.column,
+        }));
+    }
+    Ok(Some(FileMapping { sources, positions }))
+}
+
+/// A row of a DWARF line program: code addresses `start..end` (relative to the contents of the
+/// code section) come from a line of a file.
+struct LineRow {
+    start: u64,
+    end: u64,
+    file: String,
+    line: u32,
+    column: u32,
+}
+
+fn dwarf_lines(module: &WasmModule, bytes: &[u8]) -> Result<Vec<LineRow>> {
+    let dwarf = gimli::Dwarf::load(|id: gimli::SectionId| -> Result<_, gimli::Error> {
+        let data = module
+            .custom
+            .iter()
+            .find(|(name, _)| name == id.name())
+            .map_or(&[][..], |(_, r)| &bytes[r.clone()]);
+        Ok(gimli::EndianSlice::new(data, gimli::LittleEndian))
+    })?;
+    let mut out = Vec::new();
+    let mut units = dwarf.units();
+    while let Some(header) = units.next()? {
+        let unit = dwarf.unit(header)?;
+        let Some(program) = unit.line_program.clone() else {
+            continue;
+        };
+        let comp_dir = unit
+            .comp_dir
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut paths: HashMap<u64, String> = HashMap::new();
+        let mut rows = program.rows();
+        let mut previous: Option<LineRow> = None;
+        while let Some((header, row)) = rows.next_row()? {
+            if let Some(mut p) = previous.take() {
+                if row.address() > p.start {
+                    p.end = row.address();
+                    out.push(p);
+                }
+            }
+            if row.end_sequence() {
+                continue;
+            }
+            let Some(line) = row.line() else { continue };
+            let file = match paths.get(&row.file_index()) {
+                Some(path) => path.clone(),
+                None => {
+                    let Some(entry) = row.file(header) else { continue };
+                    let mut path = PathBuf::from(&comp_dir);
+                    if let Some(dir) = entry.directory(header) {
+                        path.push(dwarf.attr_string(&unit, dir)?.to_string_lossy().as_ref());
+                    }
+                    path.push(dwarf.attr_string(&unit, entry.path_name())?.to_string_lossy().as_ref());
+                    let path = path.to_string_lossy().into_owned();
+                    paths.insert(row.file_index(), path.clone());
+                    path
+                }
+            };
+            let column = match row.column() {
+                gimli::ColumnType::LeftEdge => 1,
+                gimli::ColumnType::Column(c) => c.get() as u32,
+            };
+            previous = Some(LineRow {
+                start: row.address(),
+                end: 0,
+                file,
+                line: line.get() as u32,
+                column,
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// For each function of the shipped module: the start of the same body in the debug module, if
@@ -645,10 +810,31 @@ mod tests {
         let shipped = fixture("fixture.wasm");
         let (debug, mappings) =
             debug_info(1, &shipped, &[PathBuf::from("tests/wasm/fixture.debug.wasm")], true).unwrap();
-        assert!(mappings.is_empty());
         assert!(debug.unmatched_functions.is_empty(), "{debug:?}");
         assert!(debug.function_names.values().any(|n| n == "render"));
         assert_eq!(debug.files[0].kind, "debug wasm");
+
+        // DWARF lines, through the matched functions: render is at lines 13 to 18 of fixture.c
+        // (with wave inlined, lines 7 to 10), mix at 21 to 23.
+        assert_eq!(mappings.len(), 1);
+        let (_, kind, mapping) = &mappings[0];
+        assert_eq!(kind, "dwarf");
+        assert_eq!(mapping.sources.len(), 1);
+        assert!(mapping.sources[0].path.ends_with("fixture.c"), "{:?}", mapping.sources);
+        let m = WasmModule::parse(&shipped).unwrap();
+        let lines = |index: u32| -> Vec<u32> {
+            let f = m.items.iter().find(|i| i.kind == ItemKind::Function && i.index == index).unwrap();
+            mapping.positions[f.body_start..f.end].iter().flatten().map(|p| p.line).collect()
+        };
+        let render = lines(0);
+        assert!(render.contains(&16) && render.iter().all(|l| (7..=18).contains(l)), "{render:?}");
+        let mix = lines(1);
+        assert!(!mix.is_empty() && mix.iter().all(|l| (21..=23).contains(l)), "{mix:?}");
+        assert!(mapping.positions.iter().flatten().all(|p| p.column >= 1));
+        // Nothing outside the code.
+        let code = m.items.iter().filter(|i| i.kind == ItemKind::Function);
+        let in_code: usize = code.map(|f| mapping.positions[f.body_start..f.end].iter().flatten().count()).sum();
+        assert_eq!(in_code, mapping.positions.iter().flatten().count());
 
         // A function whose code differs gets no name.
         let mut changed = shipped.clone();
@@ -660,9 +846,10 @@ mod tests {
             .find(|i| i.start >= f.body_start && i.op == "F32Const")
             .unwrap();
         changed[ins.end - 1] ^= 0x40;
-        let (debug, _) =
+        let (debug, mappings) =
             debug_info(1, &changed, &[PathBuf::from("tests/wasm/fixture.debug.wasm")], true).unwrap();
         assert_eq!(debug.unmatched_functions, [f.index]);
+        assert!(mappings[0].2.positions[f.body_start..f.end].iter().all(Option::is_none));
         assert!(!debug.function_names.contains_key(&f.index));
         assert_eq!(debug.notes.len(), 1);
 
@@ -671,6 +858,18 @@ mod tests {
         assert!(debug_info(1, &shipped, &missing, true).is_err());
         let (debug, _) = debug_info(1, &shipped, &missing, false).unwrap();
         assert_eq!(debug.notes.len(), 1);
+    }
+
+    #[test]
+    fn shipped_dwarf() {
+        // A file that still has its debug info needs no debug file.
+        let bytes = fixture("fixture.debug.wasm");
+        let (debug, mappings) = debug_info(1, &bytes, &[], true).unwrap();
+        assert!(debug.function_names.values().any(|n| n == "render"));
+        let kinds: Vec<_> = debug.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(kinds, ["(name section of the file)", "(DWARF of the file)"]);
+        assert_eq!(mappings.len(), 1);
+        assert!(mappings[0].2.positions.iter().flatten().any(|p| p.line == 16));
     }
 
     #[test]

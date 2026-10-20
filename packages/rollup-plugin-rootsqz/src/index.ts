@@ -119,8 +119,8 @@ export type RootsqzOptions = {
 
   /**
    * Debug info of imported WebAssembly files, by the path of the imported file (relative to the
-   * working directory, or absolute): the unstripped `.wasm` for function names, or a `.wasm.map`
-   * source map for source lines (`--report-wasm-debug`). Implies `report`.
+   * working directory, or absolute): the unstripped `.wasm` for function names and DWARF source
+   * lines, or a `.wasm.map` source map (`--report-wasm-debug`). Implies `report`.
    * Without it, the plugin uses `x.debug.wasm` and `x.wasm.map` next to an imported `x.wasm`.
    */
   reportWasmDebug?: Record<string, string>;

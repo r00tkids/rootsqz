@@ -415,7 +415,7 @@ fn decode_vlq(segment: &str) -> Result<Vec<i64>> {
 }
 
 /// Path of a source: relative to the source map and its source root, then relative to `cwd` if inside it.
-fn resolve_source(
+pub(super) fn resolve_source(
     source: &str,
     source_root: Option<&str>,
     base: &Path,
