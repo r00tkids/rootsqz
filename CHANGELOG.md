@@ -6,6 +6,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-21
+
 ### Changed
 - `--search` saves the best config so far as `search_config.json` after each improvement, so a stopped search leaves a config to build with, and running the same command again resumes it. It keeps its state in the output directory, or in the `--search-cache` directory if given, and removes it when the search is done.
 - **Breaking:** `--size-profile` (and `sizeProfile` of the Node API and the plugin) defaults to `64k` instead of `4k`, as rootsqz is made for 64k intros. Its decoder needs up to about 1 GB of memory. For a 4k intro, pass `--size-profile 4k`. `--brotli` without `--size-profile` still works.
@@ -163,6 +165,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.12.0]: https://github.com/r00tkids/rootsqz/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/r00tkids/rootsqz/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/r00tkids/rootsqz/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/r00tkids/rootsqz/compare/v0.9.0...v0.9.1
