@@ -6,6 +6,11 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-21
+
+### Changed
+- The `64k` and `64k-wasm` presets pack about 1.2% smaller, decoder included (1.6 KB on three 64k intros), with settings found by `rootsqz search`: more CharClass models, Match models that compare more candidates, ContextMixer weights chosen by the state of more models, and lower learning rates. The decoder still needs up to about 1 GB of memory.
+
 ## [0.12.0] - 2026-10-21
 
 ### Changed
@@ -165,6 +170,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.13.0]: https://github.com/r00tkids/rootsqz/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/r00tkids/rootsqz/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/r00tkids/rootsqz/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/r00tkids/rootsqz/compare/v0.9.1...v0.10.0

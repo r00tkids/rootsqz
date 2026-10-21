@@ -1124,22 +1124,27 @@ mod tests {
             } => (selectors.clone(), apms.clone()),
             _ => panic!(),
         };
+        let ModelConfig::ContextMixer { apms: before_apms, .. } = &config.model else {
+            panic!()
+        };
         let (selectors, apms) = mixer(find("remove selector Order1"));
         assert!(!selectors.contains(&Selector::Order1));
-        assert_eq!(apms.len(), 6);
+        assert_eq!(apms.len(), before_apms.len());
         let (selectors, _) = mixer(find("add selector State(2) NOrderByte 0b00000011"));
         assert_eq!(selectors.last(), Some(&Selector::State(2)));
+        let index = |ctx| before_apms.iter().position(|apm| apm.ctx == ctx).unwrap();
+        let (order1, order2) = (index(ApmContext::Order1), index(ApmContext::Order2));
         let (_, apms) = mixer(find("APM Order1 limit 255"));
-        assert_eq!(apms[1].limit, 255);
+        assert_eq!(apms[order1].limit, 255);
         let (_, apms) = mixer(find("APM Order2 bits 11"));
-        assert_eq!(apms[2].bits, 11);
-        let (_, apms) = mixer(find("APM Order0 weight 0.13"));
-        assert_eq!(apms[0].weight, 0.13);
-        let (_, apms) = mixer(find("remove APM Order0"));
-        assert_eq!(apms.len(), 5);
+        assert_eq!(apms[order2].bits, 11);
+        let (_, apms) = mixer(find("APM Order1 weight 0.13"));
+        assert_eq!(apms[order1].weight, 0.13);
+        let (_, apms) = mixer(find("remove APM Order1"));
+        assert_eq!(apms.len(), before_apms.len() - 1);
         let (_, apms) = mixer(find("add APM State(18) JsContext 0"));
         assert_eq!(apms.last().unwrap().ctx, ApmContext::State(18));
-        find("add CharClass order 8");
+        find("add CharClass order 5");
 
         let records = |m: &Move| m.config.static_model_params.records.models.clone();
         let before = config.static_model_params.records.models.clone();
@@ -1147,9 +1152,9 @@ mod tests {
         assert_eq!(records(find("remove Record [-1] column")).len(), before.len() - 1);
         assert_eq!(records(find("Record [-1] column max_count 100"))[0].max_count, Some(100));
         assert_eq!(records(find("Record [-1] column -> Record [-1]"))[0].column, false);
-        assert_eq!(records(find("Record [-1, -2, -3] -> Record [-1, -2]"))[2].dists, [-1, -2]);
-        find("Record [-1, -2, -3] -> Record [-1, -2, -3, -4]");
-        assert_eq!(records(find("add Record [1] column")).len(), before.len() + 1);
+        let moved = records(find("Record [-1, -2, -3, -4] -> Record [-1, -2, -3]"));
+        assert_eq!(moved[1].dists, [-1, -2, -3]);
+        assert_eq!(records(find("add Record [-2] column")).len(), before.len() + 1);
         assert!(!neighbours(&config, false, false)
             .iter()
             .any(|m| m.label.contains("Record")));
