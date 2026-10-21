@@ -89,9 +89,9 @@ pub struct Args {
     #[arg(long)]
     pub config: Option<PathBuf>,
 
-    /// Embedded model preset, used when --config is omitted
-    #[arg(long, value_enum, default_value_t = SizeProfile::FourK)]
-    pub size_profile: SizeProfile,
+    /// Embedded model preset, used when --config is omitted (default: 64k)
+    #[arg(long, value_enum)]
+    pub size_profile: Option<SizeProfile>,
 
     /// Pack a web input as a Brotli stream (Firefox 147+ / Safari 18.4+)
     #[arg(long)]
@@ -524,7 +524,8 @@ pub fn run(args: Args) -> Result<()> {
         if args.target != output_generator::Target::Web {
             bail!("--brotli requires the web target");
         }
-        if args.config.is_some() || args.size_profile != SizeProfile::FourK || args.wants_report() {
+        let profile_64k = matches!(args.size_profile, Some(profile) if profile != SizeProfile::FourK);
+        if args.config.is_some() || profile_64k || args.wants_report() {
             bail!("--brotli cannot be combined with --config, --size-profile 64k or 64k-wasm, or --report");
         }
         println!("Packing {} source bytes with Brotli", source_len);
@@ -542,7 +543,7 @@ pub fn run(args: Args) -> Result<()> {
     let config_json = match &args.config {
         Some(path) => std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config: {}", path.display()))?,
-        None => args.size_profile.config_json().to_owned(),
+        None => args.size_profile.unwrap_or(SizeProfile::SixtyFourK).config_json().to_owned(),
     };
     let mut model_config: CompressConfig =
         serde_json::from_str(&config_json).with_context(|| {

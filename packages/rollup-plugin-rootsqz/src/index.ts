@@ -82,9 +82,9 @@ export type RootsqzOptions = {
   rootsqzPath?: string;
 
   /**
-   * Embedded compression preset (`--size-profile`). The executable defaults to `4k`;
-   * `64k` adds models for larger inputs, whose decoder needs up to about 1 GB of memory, and
-   * `64k-wasm` also models WebAssembly files.
+   * Embedded compression preset (`--size-profile`). The executable defaults to `64k`, whose
+   * decoder needs up to about 1 GB of memory; `4k` is for small intros, and `64k-wasm` also
+   * models WebAssembly files.
    */
   sizeProfile?: "4k" | "64k" | "64k-wasm";
 
@@ -203,7 +203,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
   const wantsReport = Boolean(options.report || options.reportModels || options.reportDetail?.length ||
     Object.keys(options.reportWasmDebug ?? {}).length);
   const wasmDebug = new Map(Object.entries(options.reportWasmDebug ?? {}).map(([file, debug]) => [path.resolve(file), path.resolve(debug)]));
-  if (options.brotli && (options.config || wantsReport || (options.sizeProfile ?? "4k") !== "4k")) {
+  if (options.brotli && (options.config || wantsReport || options.sizeProfile !== undefined && options.sizeProfile !== "4k")) {
     throw new Error('The "brotli" option cannot be combined with "config", "report" or a "64k" size profile.');
   }
 

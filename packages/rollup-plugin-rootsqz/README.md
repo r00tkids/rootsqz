@@ -66,9 +66,9 @@ rootsqz({
     rootsqzPath: undefined,
 
     /**
-     * Embedded compression preset, "4k" (default), "64k" or "64k-wasm".
-     * The 64k presets add models for larger inputs, whose decoder needs up to about 1 GB of memory,
-     * and "64k-wasm" also models WebAssembly files.
+     * Embedded compression preset: "64k" (default), "4k" for small intros, or "64k-wasm",
+     * which also models WebAssembly files. The decoder of the 64k presets needs up to about
+     * 1 GB of memory.
      */
     sizeProfile: "64k",
 

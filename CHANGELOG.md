@@ -6,6 +6,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** `--size-profile` (and `sizeProfile` of the Node API and the plugin) defaults to `64k` instead of `4k`, as rootsqz is made for 64k intros. Its decoder needs up to about 1 GB of memory. For a 4k intro, pass `--size-profile 4k`. `--brotli` without `--size-profile` still works.
+
 ## [0.11.0] - 2026-10-21
 
 ### Added
