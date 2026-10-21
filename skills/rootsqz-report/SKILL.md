@@ -40,7 +40,7 @@ Every build overwrites the report. Copy `report.json` before you change somethin
 Start with `report.json` in the report directory. Its `about` entry explains the fields. The main ones:
 - `totals`: input bytes, `cost_bytes` (the size of the compressed stream from the costs), `output_bytes` (the size of the output file).
 - `outputs`: the parts of the output file: the HTML header, the decompressor, the compressed stream, pre-compressed files.
-- `sections`: the input files in the order they are compressed: the main JavaScript first, then each packed file. Each has its cost and bits per byte.
+- `sections`: the input files in the order they are compressed: the main JavaScript first, then the bytes of its long base64 strings if it has any (kind `base64`; the main JavaScript has one byte in place of each string), then each packed file. Each has its cost and bits per byte.
 - `sources` and `top.source_lines` (with a source map): what the code of each original source file and line costs.
 - `suggestions`: candidates worth looking into, each with a `query` for `rootsqz report`.
 - `top`: the most expensive hotspots, identifiers, numbers and repeated strings, and blocks of binary files.
@@ -71,7 +71,7 @@ rootsqz report dist/rootsqz-output --view wasm-instructions --range 3400..3500
 rootsqz report dist/rootsqz-output --view wasm-opcode-totals --top 20
 ```
 
-`rootsqz report --help` lists all views and filters (`--section`, `--source`, `--range`, `--kind`, `--sort`, `--top`, `--min-bits`, `--models`). Offsets are byte offsets in the decompressed stream, which is the main JavaScript followed by each packed file. The `source` and `source_line` columns name the original file and line of the first byte of a row.
+`rootsqz report --help` lists all views and filters (`--section`, `--source`, `--range`, `--kind`, `--sort`, `--top`, `--min-bits`, `--models`). Offsets are byte offsets in the decompressed stream, which is the main JavaScript, the decoded base64 strings and each packed file. The `source` and `source_line` columns name the original file and line of the first byte of a row.
 
 ## 4. Change the source, then measure
 

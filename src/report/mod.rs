@@ -41,7 +41,8 @@ pub struct Section {
     /// Name given with --report-label, e.g. the module the plugin made the file from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// `main` for the main JavaScript, `file` for a `--file`.
+    /// `main` for the main JavaScript, `base64` for the decoded base64 runs taken out of it,
+    /// `file` for a `--file`.
     pub kind: String,
     /// Offset of the first byte in the decompressed stream.
     pub start: usize,

@@ -5,7 +5,9 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::compressor::compress_config::{ModelConfig, StaticModelParams};
+use crate::compressor::records::BLOCK;
+use crate::compressor::compress_config::{ModelConfig, StaticModelParams, StreamLayout};
+use crate::compressor::mixer::{ApmContext, Selector};
 use anyhow::{anyhow, Context, Result};
 use bitflags::bitflags;
 use clap::ValueEnum;
@@ -19,10 +21,47 @@ pub struct OutputGenerationOptions {
     pub target: Target,
     pub model_config: ModelConfig,
     pub static_model_params: StaticModelParams,
+    /// The WebAssembly modules and record ranges of the stream, for their models
+    pub layout: StreamLayout,
     /// Loader shown while the web output decompresses
     pub loader: Option<Loader>,
     /// How the web output decodes
     pub decoder: Decoder,
+    /// Base64 runs taken out of the main JavaScript, which the decoder puts back
+    pub base64: Option<Base64Runs>,
+}
+
+/// Base64 runs taken out of the main JavaScript. The stream has the JavaScript with a marker
+/// byte for each run, and then the bytes that the runs decode to.
+#[derive(Debug, Clone)]
+pub struct Base64Runs {
+    pub marker: u8,
+    /// Number of decoded bytes of each run
+    pub lengths: Vec<usize>,
+}
+
+impl Base64Runs {
+    /// JavaScript that puts the runs back into `text`, the main JavaScript of the stream `d` as a
+    /// string, with the decoded bytes from offset `js_main_len` on
+    fn restore(&self, text: &str, js_main_len: usize) -> String {
+        format!(
+            "((k, n) => {text}.replace(/\\x{:02x}/g, () => btoa(d.slice(k, k += n.shift()).reduce((s, c) => s + String.fromCharCode(c), \"\"))))({js_main_len}, {:?})",
+            self.marker, self.lengths
+        )
+    }
+
+    fn total_len(&self) -> usize {
+        self.lengths.iter().sum()
+    }
+}
+
+/// JavaScript that evaluates to the main JavaScript as a string, from the decoded stream `d`
+fn main_js_source(js_main_len: usize, base64: Option<&Base64Runs>) -> String {
+    let text = format!("new TextDecoder().decode(d.slice(0, {js_main_len}))");
+    match base64 {
+        Some(runs) => runs.restore(&text, js_main_len),
+        None => text,
+    }
 }
 
 /// How the web output decodes
@@ -54,61 +93,137 @@ bitflags! {
         const None = 0b00000000;
         const NOrderByte = 0b00000001;
         const Mixer = 0b00000010;
-        const AdaptiveProbabilityMap = 0b00000100;
         const Word = 0b00001000;
-        const HashTable = 0b00010000;
         const CharClass = 0b00100000;
         const TokenPosition = 0b01000000;
         const MatchPredictor = 0b10000000;
         const IndirectByte = 0b100000000;
+        const Match = 0b1000000000;
+        const JsContext = 0b10000000000;
+        const WasmContext = 0b100000000000;
+        const Record = 0b1000000000000;
+        const ContextMixer = 0b10000000000000;
     }
 }
 
 pub fn generate_js_decompression_code(
     model_config: &ModelConfig,
     static_model_params: &StaticModelParams,
+    layout: &StreamLayout,
     features_used: &mut ModelRef,
 ) -> String {
-    let mut static_src: String = "".to_owned();
     let mut out_src = "let model = ".to_owned();
-    out_src += generate_js_ctors(model_config, static_model_params, features_used).as_str();
+    let mut wasm_ranges = Some(layout.wasm.as_slice()).filter(|ranges| !ranges.is_empty());
+    out_src += &generate_js_ctors(
+        model_config,
+        static_model_params,
+        &mut wasm_ranges,
+        features_used,
+    );
 
     out_src += ";\n";
+    if features_used.contains(ModelRef::Record) {
+        // As the gap before each range and its length, in blocks, and its stride
+        let mut end = 0;
+        let table: Vec<u32> = layout
+            .records
+            .iter()
+            .flat_map(|&[start, range_end, stride]| {
+                assert!(start % BLOCK == 0 && range_end % BLOCK == 0);
+                let gap = start - std::mem::replace(&mut end, range_end);
+                [gap / BLOCK, (range_end - start) / BLOCK, stride]
+            })
+            .collect();
+        out_src = format!("let Records = {table:?};\n") + &out_src;
+    }
 
-    static_src += include_str!("js_source/hash_map.js");
+    let mut static_src: String = include_str!("js_source/utils.js").to_owned();
     static_src += include_str!("js_source/coder.js");
-    static_src += include_str!("js_source/utils.js");
 
-    if *features_used & (ModelRef::CharClass | ModelRef::IndirectByte) != ModelRef::None {
-        static_src += include_str!("js_source/norder_byte_extended.js");
-    } else if *features_used & (ModelRef::NOrderByte | ModelRef::Word | ModelRef::TokenPosition)
-        != ModelRef::None
-    {
-        static_src += include_str!("js_source/norder_byte.js");
+    if features_used.intersects(
+        ModelRef::NOrderByte
+            | ModelRef::Word
+            | ModelRef::CharClass
+            | ModelRef::TokenPosition
+            | ModelRef::IndirectByte
+            | ModelRef::JsContext
+            | ModelRef::WasmContext
+            | ModelRef::Record,
+    ) {
+        let bits = static_model_params.hash_table_pow2_size;
+        static_src += &format!(
+            "let counters = new Uint32Array(2 ** {}), counterBits = {bits};\n",
+            bits + 1
+        );
+        let mut counters = include_str!("js_source/counters.js").replace(
+            "count + 0.2",
+            &format!("count + {}", static_model_params.count_offset),
+        );
+        let scale = static_model_params.context_input_scale;
+        if scale != 1. {
+            // The scales of the inputs, as ContextStats::pred computes them
+            for (from, factor) in [
+                ("probStretch(p) * 0.5,", 0.5),
+                ("(p - 0.5) * 3,", 3.),
+                ("/ U24Max) * 0.4,", 0.4),
+                ("-info) * 0.25 :", 0.25),
+                ("counters[i] >>> 24 ? 0 : 1", 1.),
+            ] {
+                assert!(counters.contains(from));
+                counters = counters.replace(from, &scaled_input(from, factor * scale));
+            }
+        }
+        if features_used.contains(ModelRef::ContextMixer) {
+            // The ContextMixer also takes the count of the counter of the bit as the state of a
+            // model, as ContextStats::count
+            let learn = "    l: (bit, s) => {";
+            assert!(counters.contains(learn));
+            counters = counters.replace(
+                learn,
+                &format!("    s: () => ctx == null ? 0 : counters[i] >>> 24,\n{learn}"),
+            );
+        }
+        static_src += &counters;
     }
-
-    if features_used.contains(ModelRef::TokenPosition) {
-        static_src += include_str!("js_source/token_position.js");
-    }
-
-    if features_used.contains(ModelRef::Mixer) {
-        static_src += include_str!("js_source/mixer.js");
-    }
-
-    if features_used.contains(ModelRef::AdaptiveProbabilityMap) {
-        static_src += include_str!("js_source/adaptive_probability_map.js");
-    }
-
-    if features_used.contains(ModelRef::MatchPredictor) {
-        static_src += include_str!("js_source/match_predictor.js");
+    for (feature, source) in [
+        (ModelRef::NOrderByte, include_str!("js_source/norder_byte.js")),
+        (ModelRef::Word, include_str!("js_source/word.js")),
+        (ModelRef::CharClass, include_str!("js_source/char_class.js")),
+        (ModelRef::IndirectByte, include_str!("js_source/indirect_byte.js")),
+        (ModelRef::TokenPosition, include_str!("js_source/token_position.js")),
+        (ModelRef::JsContext, include_str!("js_source/js_context.js")),
+        (ModelRef::Mixer, include_str!("js_source/mixer.js")),
+        (ModelRef::ContextMixer, include_str!("js_source/context_mixer.js")),
+        (ModelRef::WasmContext, include_str!("js_source/wasm.js")),
+        (ModelRef::Record, include_str!("js_source/record_model.js")),
+        (ModelRef::MatchPredictor, include_str!("js_source/match_predictor.js")),
+        (ModelRef::Match, include_str!("js_source/match_model.js")),
+    ] {
+        if features_used.contains(feature) {
+            static_src += source;
+        }
     }
 
     static_src + "\n" + out_src.as_str()
 }
 
+/// `input` of counters.js with its constant factor replaced by `factor`
+fn scaled_input(input: &str, factor: f64) -> String {
+    match input {
+        "counters[i] >>> 24 ? 0 : 1" => format!("counters[i] >>> 24 ? 0 : {factor}"),
+        _ => {
+            let (head, rest) = input.rsplit_once("* ").unwrap();
+            let end = rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
+            format!("{head}* {factor}{end}")
+        }
+    }
+}
+
+/// `wasm_ranges` are the stream ranges of the WebAssembly modules, given to the first WasmContext.
 fn generate_js_ctors(
     model_config: &ModelConfig,
     static_model_params: &StaticModelParams,
+    wasm_ranges: &mut Option<&[(u32, u32)]>,
     features_used: &mut ModelRef,
 ) -> String {
     match model_config {
@@ -117,39 +232,81 @@ fn generate_js_ctors(
             max_count,
         } => {
             *features_used |= ModelRef::NOrderByte;
-            *features_used |= ModelRef::HashTable;
+            let mask = u8::from_str_radix(byte_mask.trim_start_matches("0b"), 2).unwrap_or(0);
             match max_count {
-                Some(max_count) => format!("NOrderByte({}, 0, {})", byte_mask, max_count),
-                None => format!("NOrderByte({}, 0)", byte_mask),
+                Some(max_count) => format!("NOrderByte({mask}, {max_count})"),
+                None => format!("NOrderByte({mask})"),
             }
         }
         ModelConfig::CharClass { order, max_count } => {
             *features_used |= ModelRef::CharClass;
-            *features_used |= ModelRef::HashTable;
-            format!("NOrderByte(0, 0, {}, {})", max_count.unwrap_or(15), order)
+            format!("CharClass({order}, {})", max_count.unwrap_or(15))
         }
         ModelConfig::Mixer { models } => {
             *features_used |= ModelRef::Mixer;
             let models_js: Vec<String> = models
-                .into_iter()
-                .map(|c| generate_js_ctors(c, static_model_params, features_used))
+                .iter()
+                .map(|c| generate_js_ctors(c, static_model_params, wasm_ranges, features_used))
                 .collect();
             format!(
-                "LnMixerPred([{}], {}, {}, {})",
+                "Mixer([{}], {}, {}, {})",
                 models_js.join(", "),
                 static_model_params.mixer.learning_rate,
                 static_model_params.mixer.context_learning_rate,
                 static_model_params.mixer.context_weight_scale
             )
         }
-        ModelConfig::AdaptiveProbabilityMap(model_config) => {
-            *features_used |= ModelRef::AdaptiveProbabilityMap;
-            let inner_js = generate_js_ctors(model_config, static_model_params, features_used);
-            format!("AdaptiveProbabilityMap(19, {})", inner_js)
+        ModelConfig::ContextMixer {
+            models,
+            selectors,
+            learning_rate,
+            final_learning_rate,
+            init_weight,
+            lr_boost,
+            apms,
+        } => {
+            *features_used |= ModelRef::ContextMixer;
+            let models_js: Vec<String> = models
+                .iter()
+                .map(|c| generate_js_ctors(c, static_model_params, wasm_ranges, features_used))
+                .collect();
+            let selectors: Vec<String> = selectors
+                .iter()
+                .map(|s| match s {
+                    Selector::None => 0,
+                    Selector::Order1 => 1,
+                    Selector::Known => 2,
+                    Selector::Context(model) => 100 + model,
+                    Selector::State(model) => 200 + model,
+                }.to_string())
+                .collect();
+            let apms: Vec<String> = apms
+                .iter()
+                .map(|apm| {
+                    let (ctx, model, bits) = match apm.ctx {
+                        ApmContext::Order0 => (0, 0, None),
+                        ApmContext::Order1 => (1, 0, None),
+                        ApmContext::Order2 => (2, 0, Some(apm.bits)),
+                        ApmContext::State(model) => (3, model, None),
+                        ApmContext::Context(model) => (4, model, Some(apm.bits)),
+                    };
+                    let bits = bits.map(|bits| format!(",{bits}")).unwrap_or_default();
+                    format!("[{ctx},{model},{},{}{bits}]", apm.limit, apm.weight)
+                })
+                .collect();
+            format!(
+                "ContextMixer([{}], [{}], {learning_rate}, {final_learning_rate}, {init_weight}, {lr_boost}, [{}])",
+                models_js.join(", "),
+                selectors.join(","),
+                apms.join(",")
+            )
+        }
+        ModelConfig::AdaptiveProbabilityMap(_) => {
+            unreachable!("create_model rejects AdaptiveProbabilityMap")
         }
         ModelConfig::Word => {
             *features_used |= ModelRef::Word;
-            format!("NOrderByte(0, 1, {})", static_model_params.word_max_count)
+            format!("Word({})", static_model_params.word_max_count)
         }
         ModelConfig::TokenPosition => {
             *features_used |= ModelRef::TokenPosition;
@@ -176,8 +333,47 @@ fn generate_js_ctors(
             max_count,
         } => {
             *features_used |= ModelRef::IndirectByte;
-            *features_used |= ModelRef::NOrderByte;
-            format!("NOrderByte(0, 0, {}, 0, {})", max_count, context_bytes)
+            format!("IndirectByte({context_bytes}, {max_count})")
+        }
+        ModelConfig::Match {
+            min_len,
+            candidates,
+            expected_byte_context,
+            second,
+        } => {
+            *features_used |= ModelRef::Match;
+            format!(
+                "MatchModel({min_len}, {candidates}, {})",
+                *expected_byte_context as u8 | (*second as u8) << 1
+            )
+        }
+        ModelConfig::JsContext { variant, max_count } => {
+            *features_used |= ModelRef::JsContext;
+            format!("JsContext({}, {})", variant, max_count.unwrap_or(15))
+        }
+        ModelConfig::WasmContext { fields, max_count } => {
+            *features_used |= ModelRef::WasmContext;
+            let max_count = max_count.unwrap_or(15);
+            match wasm_ranges.take() {
+                Some(ranges) => {
+                    let ranges: Vec<String> = ranges
+                        .iter()
+                        .map(|(start, end)| format!("[{start},{end}]"))
+                        .collect();
+                    format!("WasmContext({fields}, {max_count}, [{}])", ranges.join(","))
+                }
+                None => format!("WasmContext({fields}, {max_count})"),
+            }
+        }
+        ModelConfig::Record(config) => {
+            *features_used |= ModelRef::Record;
+            format!(
+                "RecordModel({:?}, {}, {}, {})",
+                config.dists,
+                config.column as u8,
+                config.delta,
+                config.max_count.unwrap_or(15)
+            )
         }
     }
 }
@@ -205,9 +401,9 @@ mod tests {
         let mut features_used = ModelRef::None;
 
         let js =
-            generate_js_decompression_code(&model_config, &static_model_params, &mut features_used);
+            generate_js_decompression_code(&model_config, &static_model_params, &StreamLayout::default(), &mut features_used);
 
-        assert!(js.contains("LnMixerPred([NOrderByte(0b00000000, 0)], 0.001, 0.02, 0.4)"));
+        assert!(js.contains("Mixer([NOrderByte(0)], 0.001, 0.02, 0.4)"));
     }
 
     #[test]
@@ -216,9 +412,9 @@ mod tests {
         params.word_max_count = 2;
         let mut features_used = ModelRef::None;
 
-        let js = generate_js_decompression_code(&ModelConfig::Word, &params, &mut features_used);
+        let js = generate_js_decompression_code(&ModelConfig::Word, &params, &StreamLayout::default(), &mut features_used);
 
-        assert!(js.contains("NOrderByte(0, 1, 2)"));
+        assert!(js.contains("Word(2)"));
     }
 
     #[test]
@@ -231,9 +427,9 @@ mod tests {
         let js = generate_js_decompression_code(
             &model_config,
             &StaticModelParams::default(),
-            &mut features_used,
+            &StreamLayout::default(), &mut features_used,
         );
-        assert!(js.contains("let model = NOrderByte(0b00000001, 0, 3);"));
+        assert!(js.contains("let model = NOrderByte(1, 3);"));
     }
 
     #[test]
@@ -246,7 +442,7 @@ mod tests {
         let js = generate_js_decompression_code(
             &ModelConfig::TokenPosition,
             &params,
-            &mut features_used,
+            &StreamLayout::default(), &mut features_used,
         );
         assert!(js.contains("let model = TokenPosition(4, 0, 2);"));
         assert!(features_used.contains(ModelRef::TokenPosition));
@@ -386,15 +582,21 @@ pub fn render_output(
         target,
         model_config,
         static_model_params,
+        layout,
         loader,
         decoder,
+        base64,
     } = output_options;
 
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
     let mut features_used = ModelRef::None;
-    let mut decompression_code =
-        generate_js_decompression_code(&model_config, &static_model_params, &mut features_used);
+    let mut decompression_code = generate_js_decompression_code(
+        &model_config,
+        &static_model_params,
+        &layout,
+        &mut features_used,
+    );
     // Only the decoder that the boot code calls is included
     decompression_code += match decoder {
         Decoder::Serial => include_str!("js_source/decompress.js"),
@@ -465,53 +667,17 @@ pub fn render_output(
 
             files_map += "}";
 
-            let decompressor_code = Handlebars::new()
-                .render_template(
-                    include_str!("templates/web/boot.js"),
-                    &json!({
-                        "decompressor_source": decompression_code,
-                        "encoded_len": encoded_data.len(),
-                        "decoded_len": size_before_compression,
-                        "files_map": files_map,
-                        "js_main_len": js_main_len,
-                        "loader": loader.is_some(),
-                        // Trimmed, as the trailing newline of a file would be packed as well
-                        "loader_html": serde_json::to_string(
-                            loader.as_ref().and_then(|loader| loader.html.as_deref()).unwrap_or("").trim()
-                        )?,
-                        "loader_js": loader.as_ref().and_then(|loader| loader.js.as_deref()),
-                        "keep": loader.as_ref().is_some_and(|loader| loader.keep),
-                        "sliced": decoder == Decoder::Sliced,
-                        "worker": decoder == Decoder::Worker,
-                    }),
-                )
-                .context("Failed to render decompression code template")?;
+            let (decompressor_code_ugly, deflated_code) = boot_code(
+                &decompression_code,
+                encoded_data.len(),
+                size_before_compression,
+                &files_map,
+                &main_js_source(js_main_len, base64.as_ref()),
+                loader.as_ref(),
+                decoder,
+            )?;
 
-            // The loader JavaScript is part of the boot code, so a syntax error in it fails here
-            let decompressor_code_ugly = uglify_src(&decompressor_code)
-                .context("Failed to minify the boot code, including the loader JavaScript")?;
-
-            info!(
-                "Decompression code size before deflate: {}",
-                decompressor_code_ugly.len()
-            );
-
-            let deflated_code = deflate_text(&decompressor_code_ugly)
-                .context("Failed to deflate decompression code")?;
-
-            info!(
-                "Decompression code size after deflate: {}",
-                deflated_code.len()
-            );
-
-            let html_header_str = Handlebars::new()
-                .render_template(
-                    include_str!("templates/web/index.html"),
-                    &json!({
-                        "decompressor_end": 171 + deflated_code.len(),
-                    }),
-                )
-                .context("Failed to render html header template")?;
+            let html_header_str = html_header(deflated_code.len())?;
             let html_header_bytes = html_header_str.as_bytes();
 
             info!(
@@ -607,6 +773,12 @@ pub fn render_output(
                         "decoded_len": size_before_compression,
                         "input_file": "input.pack",
                         "output_file": "output.bin",
+                        // The node output is the original stream, so it puts the runs back as bytes
+                        "restore": base64.as_ref().map(|runs| format!(
+                            "d => Buffer.concat([Buffer.from({}, 'latin1'), d.slice({})])",
+                            runs.restore(&format!("Buffer.from(d.slice(0, {js_main_len})).toString('latin1')"), js_main_len),
+                            js_main_len + runs.total_len()
+                        )),
                     }),
                 )
                 .context("Failed to render node decompressor template")?;
@@ -638,6 +810,117 @@ pub fn render_output(
             ]
         }
     })
+}
+
+/// The boot code of the web output, minified and deflated.
+fn boot_code(
+    decompression_code: &str,
+    encoded_len: usize,
+    decoded_len: usize,
+    files_map: &str,
+    main_js: &str,
+    loader: Option<&Loader>,
+    decoder: Decoder,
+) -> Result<(String, Vec<u8>)> {
+    let decompressor_code = Handlebars::new()
+        .render_template(
+            include_str!("templates/web/boot.js"),
+            &json!({
+                "decompressor_source": decompression_code,
+                "encoded_len": encoded_len,
+                "decoded_len": decoded_len,
+                "files_map": files_map,
+                "main_js": main_js,
+                "loader": loader.is_some(),
+                // Trimmed, as the trailing newline of a file would be packed as well
+                "loader_html": serde_json::to_string(
+                    loader.and_then(|loader| loader.html.as_deref()).unwrap_or("").trim()
+                )?,
+                "loader_js": loader.and_then(|loader| loader.js.as_deref()),
+                "keep": loader.is_some_and(|loader| loader.keep),
+                "sliced": decoder == Decoder::Sliced,
+                "worker": decoder == Decoder::Worker,
+            }),
+        )
+        .context("Failed to render decompression code template")?;
+
+    // The loader JavaScript is part of the boot code, so a syntax error in it fails here
+    let decompressor_code_ugly = uglify_src(&decompressor_code)
+        .context("Failed to minify the boot code, including the loader JavaScript")?;
+
+    info!(
+        "Decompression code size before deflate: {}",
+        decompressor_code_ugly.len()
+    );
+
+    let deflated_code =
+        deflate_text(&decompressor_code_ugly).context("Failed to deflate decompression code")?;
+
+    info!(
+        "Decompression code size after deflate: {}",
+        deflated_code.len()
+    );
+    Ok((decompressor_code_ugly, deflated_code))
+}
+
+/// What the web output of a stream is made of besides the compressed stream and the decoder,
+/// so that `web_overhead` can weigh the decoder of a model config.
+#[derive(Debug, Clone)]
+pub struct WebLayout {
+    /// The WebAssembly modules and record ranges of the stream, whose models `model_config` has
+    pub stream: StreamLayout,
+    pub base64: Option<Base64Runs>,
+    pub js_main_len: usize,
+    pub decoded_len: usize,
+    /// About the length of the compressed stream, which the boot code has as a number
+    pub encoded_len: usize,
+    /// The files of the stream: name, start and length
+    pub files: Vec<(String, u32, u32)>,
+}
+
+/// Bytes of the web output that are not the compressed stream, with the serial decoder and no
+/// loader: the HTML header and the deflated boot code, whose decoder `model_config` makes.
+/// Used to weigh a config in the search.
+pub fn web_overhead(
+    model_config: &ModelConfig,
+    static_model_params: &StaticModelParams,
+    layout: &WebLayout,
+) -> Result<usize> {
+    let mut features_used = ModelRef::None;
+    let mut decompression_code = generate_js_decompression_code(
+        model_config,
+        static_model_params,
+        &layout.stream,
+        &mut features_used,
+    );
+    decompression_code += include_str!("js_source/decompress.js");
+    let files_map: Vec<String> = layout
+        .files
+        .iter()
+        .map(|(name, start, len)| format!("{name:?}: d.slice({start},{})", start + len))
+        .collect();
+    let (_, deflated_code) = boot_code(
+        &decompression_code,
+        layout.encoded_len,
+        layout.decoded_len,
+        &format!("{{{}}}", files_map.join(", ")),
+        &main_js_source(layout.js_main_len, layout.base64.as_ref()),
+        None,
+        Decoder::Serial,
+    )?;
+    Ok(html_header(deflated_code.len())?.len() + deflated_code.len())
+}
+
+/// The HTML that inflates and runs the boot code of `deflated_len` bytes
+fn html_header(deflated_len: usize) -> Result<String> {
+    Handlebars::new()
+        .render_template(
+            include_str!("templates/web/index.html"),
+            &json!({
+                "decompressor_end": 171 + deflated_len,
+            }),
+        )
+        .context("Failed to render html header template")
 }
 
 /// Raw deflate with zopfli, which finds a smaller encoding than zlib at its best level

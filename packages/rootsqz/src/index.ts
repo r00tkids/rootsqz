@@ -200,7 +200,7 @@ export type CompressOptions = RunOptions & {
 
   /**
    * Embedded compression preset (`--size-profile`). The executable defaults to `4k`;
-   * `64k` adds a bounded match predictor for larger JavaScript inputs.
+   * `64k` adds models for larger inputs, whose decoder needs up to about 1 GB of memory.
    */
   sizeProfile?: "4k" | "64k";
 
@@ -263,6 +263,23 @@ export type CompressOptions = RunOptions & {
    * stays responsive. By default `"sliced"` with a loader script, otherwise `"serial"`.
    */
   decoder?: Decoder;
+
+  /**
+   * Search for the model config that packs the input smallest (`--search`), starting from `config`
+   * or the `sizeProfile` preset. Takes about an hour for a 64k intro; the config found is written
+   * to `search_config.json` in the output directory.
+   */
+  search?: boolean;
+
+  /**
+   * Number of configs the search tries at the same time (`--search-threads`). By default the number of CPUs.
+   */
+  searchThreads?: number;
+
+  /**
+   * Directory where the search keeps the config it found, to reuse it for the same input (`--search-cache`).
+   */
+  searchCache?: string;
 
   /**
    * Further arguments passed to the executable as they are.
@@ -331,6 +348,15 @@ export function compressArgs(options: CompressOptions): string[] {
   }
   if (options.decoder) {
     args.push("--decoder", options.decoder);
+  }
+  if (options.search) {
+    args.push("--search");
+  }
+  if (options.searchThreads) {
+    args.push("--search-threads", String(options.searchThreads));
+  }
+  if (options.searchCache) {
+    args.push("--search-cache", options.searchCache);
   }
   if (options.reportModels) {
     args.push("--report-models");

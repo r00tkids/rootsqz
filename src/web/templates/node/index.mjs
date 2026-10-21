@@ -12,6 +12,10 @@ fs.readFile(__dirname + '/{{{input_file}}}', (err, data) => {
         return;
     }
 
-    fs.writeFileSync(__dirname + '/{{{output_file}}}', decompress(model, new Uint8Array(data.buffer), {{{encoded_len}}}, {{{decoded_len}}}));
+    let d = decompress(model, new Uint8Array(data.buffer), {{{encoded_len}}}, {{{decoded_len}}});
+{{#if restore}}
+    d = ({{{restore}}})(d);
+{{/if}}
+    fs.writeFileSync(__dirname + '/{{{output_file}}}', d);
 });
 

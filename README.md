@@ -47,16 +47,21 @@ Firefox 147+ and Safari 18.4+. As of September 2026, Chrome does not support
 Brotli in `DecompressionStream`, so the arithmetic compressor remains the
 default for browser compatibility.
 
+Long base64 strings in the main JavaScript, such as fonts or wasm modules in data URLs, are compressed as the bytes they encode, and the decoder encodes them again with `btoa`.
+
+Binary files given with `--file` get models for fixed-size records, such as tables of numbers, in the parts of the files where a trial compression shows that they pay for their decoder code.
+
 Options:
 - `--js-main <file>`: Entry point JavaScript file
 - `--file <FILE>`, `-f`: Extra file to be compressed. Repeat the option for each file. Order matters, so files of similar content should be ordered together.
 - `--pre-compressed-file <FILE>`, `-p`: Extra file that is already compressed (jpeg, mp4 etc.) and is stored as it is. Repeat the option for each file.
 - `--output-directory <dir>`: Output directory for compressed files
-- `--size-profile <4k|64k>`: Embedded compression preset (default: `4k`). The `64k` preset adds a bounded match predictor for larger JavaScript inputs.
+- `--size-profile <4k|64k>`: Embedded compression preset (default: `4k`). The `64k` preset adds `Match` models that find repeats anywhere in larger inputs, contexts from the tokens, brackets and object keys of the JavaScript, and a `ContextMixer`; its decoder needs up to about 1 GB of memory.
 - `--brotli`: Use native Brotli decoding for web inputs (Firefox 147+ / Safari 18.4+).
 - `--config <file.json>`: Use a complete JSON `CompressConfig` instead of the embedded preset. This takes precedence over `--size-profile`.
 - `--loader <spinner|bar|progress>`, `--loader-html <file>`, `--loader-js <file>`, `--loader-keep`: Show a loader while the web output decompresses, see [Loader](#loader).
 - `--decoder <serial|sliced|worker>`: How the web output decodes, see [Decoder](#decoder).
+- `--search`: Search for the model config that packs this input smallest, starting from `--config` or the `--size-profile` preset, see [Config search](#config-search). `--search-threads <N>` sets how many configs it tries at the same time, and `--search-cache <DIR>` keeps the config it found, to reuse it when the same input is packed again.
 - `--report`, `-r`: Write a [compression report](#compression-report) to `report/` in the output directory.
 - `--report-models`: Also record what every submodel predicted (implies `--report`).
 - `--report-detail <VIEW,...>`: Also write these views of the report as TSV files, e.g. `lines,tokens` (implies `--report`).
@@ -65,7 +70,14 @@ Options:
 - `--report-wasm-debug <FILE>=<DEBUG>`: Debug info of a WebAssembly `--file`: the file before stripping, with its name section and DWARF, or a wasm source map (`.wasm.map`). Without it, `x.debug.wasm` and `x.wasm.map` next to `x.wasm` are used (implies `--report`).
 - See `rootsqz --help` for more CLI options
 
-Both presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json) or [the 64k preset](src/compressor/size_64k_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, and `{"type":"IndirectByte","context_bytes":2,"max_count":15}`. The decoder is generated from the selected config.
+Both presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json) or [the 64k preset](src/compressor/size_64k_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, `{"type":"Match","min_len":6}` (also `candidates`, `expected_byte_context` and `second`), `{"type":"IndirectByte","context_bytes":2,"max_count":15}`, and `{"type":"JsContext","variant":0}` (variants 0 to 3: the bracket, object key and punctuation around a token, the token that followed the previous token before, the last byte and the bracket nesting, and the sequence of token classes and punctuation). The decoder is generated from the selected config. `static_model_params.count_offset` (default `0.2`) sets how fast the counters of the context models learn: each moves by 1 / (count + `count_offset`) towards the bit.
+
+The 64k preset mixes its models with a `ContextMixer`, paq8-style. Its `selectors` each choose a set of weights by a context: `"None"` (one set), `"Order1"` (the previous byte), `"Known"` (how many models know their context), `{"State": i}` (the state of model `i` of `models`, such as the expected bit and length of a `Match`) and `{"Context": i}` (the context that model `i` offers: a `JsContext` offers the bracket, token class and punctuation, other models 0). A final weight set mixes their outputs. Its `apms` refine the result by `"Order0"`, `"Order1"`, `"Order2"` (hashed to `bits` bits), `{"State": i}` or `{"Context": i}`, and their probabilities are averaged with the mixer's by their `weight`. It takes all the inputs of each model; `static_model_params.context_input_scale` (default `1`) multiplies those of the context models, which the ContextMixer wants larger than the `Mixer`. When you add or remove models of a `ContextMixer`, keep the indexes `i` in its selectors and APMs pointing at the right models.
+
+### Config search
+`--search` tries changes to the config one at a time: a changed context mask, count limit, match length, learning rate, `context_input_scale` or table size, a model added or removed, all models of a type removed, a `ContextMixer` selector or APM added or removed or an APM's limit, weight or hash size changed, and for WebAssembly files and record ranges, changes to their models. It skips changes after which the decoder would need more than 1 GB of memory, by an estimate. It keeps a change that makes the output smaller, counting the bytes that the change adds to or takes out of the decoder, until no change helps. So a model type that does not pay for its code in the decoder on an input is left out of its output. It takes about an hour for a 64k intro. The config it found is written to `search_config.json` in the output directory; pass it with `--config` to pack again without searching. The result does not depend on `--search-threads`.
+
+`rootsqz search -i main.js,data.bin -o config.json` runs the same search without packing, writing the best config so far after each improvement. Give `-i` once per demo (the main JavaScript, then its files, separated by commas) to find one config for all of them; `--eval` prints the size of each demo with the `--config` given, and the estimated memory of its decoder. `--max-memory-mb` sets the memory limit (default 1000). With `--state <FILE>` it keeps the changes it tried and the sizes it packed in that file; to resume a stopped search, run it again with the same `--state` and `--config` set to its `-o` file.
 
 ## Compression report
 `--report` writes a report of where the bytes go to `report/` in the output directory. It covers the whole compressed stream: the main JavaScript and every `--file`, in the order they are compressed.
@@ -186,6 +198,7 @@ Notes:
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
 - To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader). To keep the page responsive while it decodes, set `decoder: "worker"`, see [Decoder](#decoder).
+- `search: true` searches for the model config that packs the bundle smallest before packing, see [Config search](#config-search). It takes about an hour for a 64k intro, so set `searchCache` to a directory that keeps the config found for the next build of the same bundle.
 - With `report: true`, the plugin writes a [compression report](#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set. For an imported `x.wasm`, it gives the report `x.debug.wasm` (the unstripped file) or `x.wasm.map` next to it as debug info, or the file that `reportWasmDebug: { 'src/x.wasm': 'build/x.full.wasm' }` names, so the report names its functions and maps them to source lines. Run `npx rootsqz install-skill` once to teach coding agents to use it ([For coding agents](#for-coding-agents)).
 
 See the [plugin README](packages/rollup-plugin-rootsqz) for all options and [examples/vite](examples/vite) for a working project with `vite-plugin-glsl`.

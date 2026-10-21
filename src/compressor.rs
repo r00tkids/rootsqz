@@ -1,8 +1,13 @@
 pub mod coder;
 pub mod compress_config;
+pub mod context_map;
+pub mod mixer;
 pub mod model;
 pub mod model_finder;
+pub mod records;
+pub mod search;
 pub mod utils;
+pub mod wasm;
 
 mod encoder;
 

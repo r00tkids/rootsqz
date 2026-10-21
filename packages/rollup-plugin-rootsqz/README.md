@@ -50,6 +50,7 @@ Notes:
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
 - To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](https://github.com/r00tkids/rootsqz#loader). To keep the page responsive while it decodes, set `decoder: "worker"`, see [Decoder](https://github.com/r00tkids/rootsqz#decoder).
+- `search: true` searches for the model config that packs the bundle smallest before packing, see [Config search](https://github.com/r00tkids/rootsqz#config-search). It takes about an hour for a 64k intro, so set `searchCache` to a directory that keeps the config found for the next build of the same bundle.
 - With `report: true`, the plugin writes a [compression report](https://github.com/r00tkids/rootsqz#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set. For an imported `x.wasm`, it gives the report `x.debug.wasm` (the unstripped file) or `x.wasm.map` next to it as debug info, or the file that `reportWasmDebug: { 'src/x.wasm': 'build/x.full.wasm' }` names, so the report names its functions and maps them to source lines. Run `npx rootsqz install-skill` once to teach coding agents to use it ([For coding agents](https://github.com/r00tkids/rootsqz#for-coding-agents)).
 
 See the [example](https://github.com/r00tkids/rootsqz/tree/main/examples/vite) for a working example with support for `vite-plugin-glsl`.
@@ -66,7 +67,7 @@ rootsqz({
 
     /**
      * Embedded compression preset, "4k" (default) or "64k".
-     * The 64k preset adds a bounded match predictor for larger JavaScript inputs.
+     * The 64k preset adds models for larger inputs, whose decoder needs up to about 1 GB of memory.
      */
     sizeProfile: "64k",
 
@@ -120,6 +121,16 @@ rootsqz({
      * See https://github.com/r00tkids/rootsqz#decoder
      */
     decoder: "worker",
+
+    /**
+     * Search for the model config that packs the bundle smallest, counting the decoder bytes of
+     * each change. `searchCache` keeps the config found for the next build of the same bundle,
+     * `searchThreads` sets how many configs are tried at once.
+     * See https://github.com/r00tkids/rootsqz#config-search
+     */
+    search: false,
+    searchThreads: undefined,
+    searchCache: undefined,
 
     /**
      * Name of the global that the boot code of the executable puts the files in.

@@ -5,12 +5,14 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
+pub mod base64;
 pub mod output_generator;
 
 use crate::{
     compressor::{
-        compress_config::CompressConfig,
+        compress_config::{CompressConfig, StreamLayout},
         model_finder::{DEFAULT_CONFIG_JSON, SIZE_64K_CONFIG_JSON},
+        records::{self, detect_records},
         Encoder,
     },
     report::{
@@ -20,7 +22,12 @@ use crate::{
         ReportData, ReportOptions, Section, View, REPORT_DIR,
     },
 };
-use output_generator::{render_output, BundledFile, Decoder, Loader, OutputGenerationOptions};
+use crate::compressor::search::{
+    cost, demo_eval, search, stream_size, Demo, SearchOptions, MAX_DECODER_MEMORY,
+};
+use output_generator::{
+    render_output, BundledFile, Decoder, Loader, OutputGenerationOptions, WebLayout,
+};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -111,6 +118,21 @@ pub struct Args {
     /// How the web output decodes. By default `sliced` with a loader script, otherwise `serial`
     #[arg(long, value_enum, value_name = "DECODER")]
     pub decoder: Option<Decoder>,
+
+    /// Search for the model config that packs the input smallest, starting from --config or the
+    /// --size-profile preset, before packing. Takes minutes to hours; the decoder is generated
+    /// from the config found, which is written to search_config.json in the output directory
+    #[arg(long)]
+    pub search: bool,
+
+    /// Number of configs --search evaluates at the same time (default: the number of CPUs)
+    #[arg(long, value_name = "N")]
+    pub search_threads: Option<usize>,
+
+    /// Directory where --search keeps the config it found for an input and start config, to
+    /// reuse it when the same input is packed again
+    #[arg(long, value_name = "DIR")]
+    pub search_cache: Option<PathBuf>,
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,9 +231,14 @@ fn parse_label(s: &str) -> Result<(String, String), String> {
 fn report_debug_info(
     args: &Args,
     main_js_bytes: &[u8],
+    base64_runs: Option<&base64::Base64Runs>,
 ) -> Result<(Option<SourceMapping>, Vec<WasmDebug>)> {
     let mut parts: Vec<(usize, MapFile, FileMapping)> = Vec::new();
     if let Some(path) = &args.report_source_map {
+        let mut mapping = FileMapping::read(path, main_js_bytes)?;
+        if let Some(runs) = base64_runs {
+            mapping.positions = runs.arrange(&mapping.positions);
+        }
         parts.push((
             0,
             MapFile {
@@ -219,13 +246,19 @@ fn report_debug_info(
                 file: path.display().to_string(),
                 kind: "source map".to_owned(),
             },
-            FileMapping::read(path, main_js_bytes)?,
+            mapping,
         ));
     }
     let mut wasm_debug = Vec::new();
+    // The decoded base64 runs are a section after the main JavaScript
     let mut start = main_js_bytes.len();
+    let mut first_file_section = 1;
+    if let Some(runs) = base64_runs {
+        start = runs.js.len() + runs.decoded.iter().map(Vec::len).sum::<usize>();
+        first_file_section = 2;
+    }
     for (i, file) in args.files.iter().enumerate() {
-        let section = i + 1;
+        let section = i + first_file_section;
         let bytes =
             std::fs::read(file).with_context(|| format!("Failed to read additional file: {file}"))?;
         let given: Vec<PathBuf> = args
@@ -282,6 +315,199 @@ fn report_debug_info(
     Ok((Some(mapping), wasm_debug))
 }
 
+/// The stream of a demo as `run` packs it: the main JavaScript with its base64 runs taken out,
+/// the decoded runs and the files. Its layout has what in the files may get their own models: the
+/// WebAssembly modules, and the ranges that may hold fixed-size records, of which
+/// `choose_layout` chooses.
+pub fn read_demo(js_main: &str, files: &[String]) -> Result<Demo> {
+    let main_js_bytes =
+        std::fs::read(js_main).with_context(|| format!("Failed to read JS main file: {js_main}"))?;
+    let base64_runs = base64::extract(&main_js_bytes, base64::MIN_RUN);
+    let mut stream = base64_runs
+        .as_ref()
+        .map_or(main_js_bytes.clone(), |runs| runs.js.clone());
+    let js_main_len = stream.len();
+    if let Some(runs) = &base64_runs {
+        stream.extend(runs.decoded.concat());
+    }
+    let files_start = stream.len();
+    let mut wasm_ranges = Vec::new();
+    let mut layout_files = Vec::new();
+    for file in files {
+        let bytes =
+            std::fs::read(file).with_context(|| format!("Failed to read additional file: {file}"))?;
+        let start = stream.len() as u32;
+        if wasm::is_wasm(&bytes) {
+            wasm_ranges.push((start, start + bytes.len() as u32));
+        }
+        let name = Path::new(file)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(file)
+            .to_owned();
+        layout_files.push((name, start, bytes.len() as u32));
+        stream.extend(bytes);
+    }
+    Ok(Demo {
+        name: std::iter::once(js_main).chain(files.iter().map(String::as_str)).collect::<Vec<_>>().join(","),
+        layout: WebLayout {
+            stream: StreamLayout {
+                wasm: wasm_ranges,
+                records: detect_records(&stream, files_start),
+            },
+            base64: base64_runs.map(|runs| output_generator::Base64Runs {
+                marker: runs.marker,
+                lengths: runs.decoded.iter().map(Vec::len).collect(),
+            }),
+            js_main_len,
+            decoded_len: stream.len(),
+            // A guess, made better by `estimate_encoded_len`
+            encoded_len: stream.len() / 6,
+            files: layout_files,
+        },
+        stream,
+    })
+}
+
+/// The layout whose models `demo` is packed with: of the layout `read_demo` detected, with or
+/// without its WebAssembly modules, and with the record ranges that `choose_record_ranges`
+/// chooses, whichever makes the web output smallest.
+pub fn choose_layout(config: &CompressConfig, demo: &Demo) -> Result<StreamLayout> {
+    let detected = &demo.layout.stream;
+    let mut wasm_options = vec![detected.wasm.clone()];
+    if !detected.wasm.is_empty() && !config.static_model_params.wasm.models.is_empty() {
+        wasm_options.push(Vec::new());
+    }
+    // Nothing to choose, so no trial compression
+    if wasm_options.len() == 1
+        && (detected.records.is_empty() || config.static_model_params.records.models.is_empty())
+    {
+        return Ok(StreamLayout {
+            wasm: detected.wasm.clone(),
+            records: Vec::new(),
+        });
+    }
+    let mut best: Option<(StreamLayout, f64)> = None;
+    for wasm in wasm_options {
+        if !wasm.is_empty() {
+            println!("Trying with the WebAssembly models:");
+        } else if !detected.wasm.is_empty() {
+            println!("Trying without the WebAssembly models:");
+        }
+        let layout = StreamLayout {
+            wasm,
+            records: detected.records.clone(),
+        };
+        let (records, size) = choose_record_ranges(config, demo, &layout)?;
+        if best.as_ref().map_or(true, |best| size < best.1) {
+            best = Some((StreamLayout { records, ..layout }, size));
+        }
+    }
+    Ok(best.unwrap().0)
+}
+
+/// The record ranges, out of the `layout.records` candidates, that the record models of the config
+/// get, and the size of the web output with them: the ranges where they save bits in a trial
+/// compression, or none if they don't make the output smaller.
+fn choose_record_ranges(
+    config: &CompressConfig,
+    demo: &Demo,
+    layout: &StreamLayout,
+) -> Result<(Vec<[u32; 3]>, f64)> {
+    let size = |layout: &StreamLayout| -> Result<(Vec<f64>, f64)> {
+        let costs = records::byte_costs(config.create_model_for(layout)?, &demo.stream);
+        let overhead = output_generator::web_overhead(
+            &config.with_stream_models(layout),
+            &config.static_model_params,
+            &WebLayout {
+                stream: layout.clone(),
+                ..demo.layout.clone()
+            },
+        )?;
+        let size = costs.iter().sum::<f64>() / 8. + overhead as f64;
+        Ok((costs, size))
+    };
+    let without_layout = StreamLayout {
+        records: Vec::new(),
+        ..layout.clone()
+    };
+    let (without, without_size) = size(&without_layout)?;
+    println!("  no record ranges: {without_size:.0} bytes");
+    let mut best = (Vec::new(), without_size);
+    if layout.records.is_empty() || config.static_model_params.records.models.is_empty() {
+        return Ok(best);
+    }
+    let mut candidates = layout.records.clone();
+    for _ in 0..3 {
+        let (with, with_size) = size(&StreamLayout {
+            records: candidates.clone(),
+            ..layout.clone()
+        })?;
+        println!("  {} record ranges: {with_size:.0} bytes", candidates.len());
+        if with_size < best.1 {
+            best = (candidates.clone(), with_size);
+        }
+        let selected = records::select_records(&candidates, &without, &with);
+        if selected == candidates || selected.is_empty() {
+            break;
+        }
+        candidates = selected;
+    }
+    Ok(best)
+}
+
+/// The config that `search` finds for the input of `args`, or the one kept in --search-cache.
+fn search_config(args: &Args, start: CompressConfig, start_json: &str) -> Result<CompressConfig> {
+    let mut demo = read_demo(&args.js_main, &args.files)?;
+    demo.layout.stream = choose_layout(&start, &demo)?;
+    // FNV-1a over the parts and their lengths, which unlike std's hashers is the same in every
+    // build of rootsqz
+    let mut hash: u64 = 0xcbf29ce484222325;
+    let file_lens: Vec<u8> =
+        demo.layout.files.iter().flat_map(|(_, _, len)| len.to_le_bytes()).collect();
+    let parts: [&[u8]; 4] = [
+        env!("CARGO_PKG_VERSION").as_bytes(),
+        start_json.as_bytes(),
+        &file_lens,
+        &demo.stream,
+    ];
+    for part in parts {
+        for &byte in (part.len() as u64).to_le_bytes().iter().chain(part) {
+            hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
+        }
+    }
+    let cache_file = args
+        .search_cache
+        .as_ref()
+        .map(|dir| dir.join(format!("{hash:016x}.json")));
+    if let Some(file) = cache_file.as_ref().filter(|file| file.exists()) {
+        println!("Using the config found before: {}", file.display());
+        return serde_json::from_str(&std::fs::read_to_string(file)?)
+            .with_context(|| format!("Failed to parse {}", file.display()));
+    }
+    let threads = args
+        .search_threads
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
+    println!("Searching for the best config ({threads} threads)...");
+    demo.layout.encoded_len = stream_size(&start, &demo)?;
+    let started = std::time::Instant::now();
+    let options = SearchOptions {
+        threads,
+        batch: 12,
+        max_evals: usize::MAX,
+        max_memory: MAX_DECODER_MEMORY,
+        state: None,
+    };
+    let (config, _) = search(start, std::slice::from_ref(&demo), &options, |line, _| {
+        println!("[{:>6.0}s] {line}", started.elapsed().as_secs_f64());
+    })?;
+    if let Some(file) = cache_file {
+        std::fs::create_dir_all(file.parent().unwrap())?;
+        std::fs::write(&file, serde_json::to_string_pretty(&config)? + "\n")?;
+    }
+    Ok(config)
+}
+
 pub fn run(args: Args) -> Result<()> {
     let loader = args.loader()?;
     let decoder = args.decoder(loader.as_ref())?;
@@ -330,15 +556,29 @@ pub fn run(args: Args) -> Result<()> {
         }
         .to_owned(),
     };
-    let model_config: CompressConfig = serde_json::from_str(&config_json).with_context(|| {
-        format!(
-            "Failed to parse config: {}",
-            args.config
-                .as_deref()
-                .unwrap_or(Path::new("(embedded)"))
-                .display()
-        )
-    })?;
+    let mut model_config: CompressConfig =
+        serde_json::from_str(&config_json).with_context(|| {
+            format!(
+                "Failed to parse config: {}",
+                args.config
+                    .as_deref()
+                    .unwrap_or(Path::new("(embedded)"))
+                    .display()
+            )
+        })?;
+    let mut config_json = config_json;
+    if args.search {
+        if args.target != output_generator::Target::Web && args.search_cache.is_none() {
+            println!("Note: the search finds the same config for a web and a node build, so --search-cache can reuse it");
+        }
+        model_config = search_config(&args, model_config, &config_json)?;
+        config_json = serde_json::to_string_pretty(&model_config)? + "\n";
+        std::fs::create_dir_all(&args.output_directory)?;
+        std::fs::write(
+            Path::new(&args.output_directory).join("search_config.json"),
+            &config_json,
+        )?;
+    }
 
     // Check the report options first, so that they fail before compressing.
     for (file, _) in &args.report_label {
@@ -354,8 +594,9 @@ pub fn run(args: Args) -> Result<()> {
             bail!("--report-wasm-debug: '{file}' is not given with --file");
         }
     }
+    let base64_runs = base64::extract(&main_js_bytes, base64::MIN_RUN);
     let (source_mapping, wasm_debug) = if args.wants_report() {
-        report_debug_info(&args, &main_js_bytes)?
+        report_debug_info(&args, &main_js_bytes, base64_runs.as_ref())?
     } else {
         (None, Vec::new())
     };
@@ -364,9 +605,18 @@ pub fn run(args: Args) -> Result<()> {
         "Starting compression (rootsqz v{})",
         env!("CARGO_PKG_VERSION")
     );
+    let stream_js = base64_runs.as_ref().map_or(&main_js_bytes, |runs| &runs.js);
+
+    // The WebAssembly modules and the records among the files get their own models, if they pay
+    // for their decoder
+    let demo = read_demo(&args.js_main, &args.files)?;
+    let layout = choose_layout(&model_config, &demo)?;
+    drop(demo);
+    let packed_model = model_config.with_stream_models(&layout);
+
     println!("Initializing hash table...");
     let model = model_config
-        .create_model()
+        .create_model_for(&layout)
         .context("Failed to create model from config")?;
 
     let mut encoded_data: Vec<u8> = Vec::new();
@@ -375,12 +625,28 @@ pub fn run(args: Args) -> Result<()> {
         encoder.record(args.report_models);
     }
 
-    println!("Compressing input data ({} bytes)", main_js_bytes.len());
-    encoder.encode_section(main_js_bytes.as_slice())?;
+    println!("Compressing input data ({} bytes)", stream_js.len());
+    encoder.encode_section(stream_js.as_slice())?;
 
-    let mut sections = vec![Section::new(&args.js_main, "main", 0, &main_js_bytes)];
+    let mut sections = vec![Section::new(&args.js_main, "main", 0, stream_js)];
+    let mut offset = stream_js.len() as u32;
+    if let Some(runs) = &base64_runs {
+        let decoded = runs.decoded.concat();
+        println!(
+            "Compressing {} base64 runs of the main JavaScript, decoded ({} bytes)",
+            runs.decoded.len(),
+            decoded.len()
+        );
+        encoder.encode_section(decoded.as_slice())?;
+        sections.push(Section::new(
+            &format!("{} (base64)", args.js_main),
+            "base64",
+            offset as usize,
+            &decoded,
+        ));
+        offset += decoded.len() as u32;
+    }
     let mut bundled_files = Vec::new();
-    let mut offset = main_js_bytes.len() as u32;
     for file in &args.files {
         let mut byte_stream =
             File::open(file).context(format!("Failed to open additional file: {}", file))?;
@@ -405,6 +671,7 @@ pub fn run(args: Args) -> Result<()> {
         offset += file_len;
     }
 
+    let stream_js_len = stream_js.len();
     let recording = encoder.take_recording();
     let size_before_compression = encoder.finish().context("Failed to finish compressing")?;
     println!(
@@ -431,14 +698,19 @@ pub fn run(args: Args) -> Result<()> {
         OutputGenerationOptions {
             output_dir: Path::new(&args.output_directory).to_owned(),
             target: args.target,
-            model_config: model_config.model.clone(),
+            model_config: packed_model.clone(),
             static_model_params: model_config.static_model_params.clone(),
+            layout,
             loader,
             decoder,
+            base64: base64_runs.map(|runs| output_generator::Base64Runs {
+                marker: runs.marker,
+                lengths: runs.decoded.iter().map(Vec::len).collect(),
+            }),
         },
         size_before_compression,
         encoded_data,
-        main_js_bytes.len(),
+        stream_js_len,
         bundled_files,
         pre_compressed_files?,
     )
@@ -463,7 +735,7 @@ pub fn run(args: Args) -> Result<()> {
         let report_dir = Path::new(&args.output_directory).join(REPORT_DIR);
         ReportData {
             model_names: if args.report_models {
-                model_config.model.submodel_names()
+                packed_model.submodel_names()
             } else {
                 Vec::new()
             },
@@ -494,5 +766,108 @@ pub fn run(args: Args) -> Result<()> {
         args.output_directory
     );
 
+    Ok(())
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SearchArgs {
+    /// Files of one demo, separated by commas, in the order they are packed: the main JavaScript
+    /// first, then the files given with --file. Can be given multiple times: the search then
+    /// minimises the total of all demos, each packed on its own
+    #[arg(short, long = "input", value_name = "FILES", required = true)]
+    pub inputs: Vec<String>,
+
+    /// Config JSON to start from (the embedded preset of --size-profile when omitted)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    /// Embedded model preset to start from, used when --config is omitted
+    #[arg(long, value_enum, default_value_t = SizeProfile::SixtyFourK)]
+    pub size_profile: SizeProfile,
+
+    /// Config JSON written with the best config found, after every improvement
+    #[arg(short, long)]
+    pub output: PathBuf,
+
+    /// Number of configs evaluated at the same time (default: the number of CPUs)
+    #[arg(long)]
+    pub threads: Option<usize>,
+
+    /// Number of changed configs evaluated before the best of them is taken
+    #[arg(long, default_value_t = 12)]
+    pub batch: usize,
+
+    /// Stop after this many evaluations
+    #[arg(long, default_value_t = usize::MAX)]
+    pub max_evals: usize,
+
+    /// Skip configs whose decoder would take more memory than this, in MB, by an estimate
+    #[arg(long, value_name = "MB", default_value_t = MAX_DECODER_MEMORY / 1_000_000)]
+    pub max_memory_mb: usize,
+
+    /// File where the search keeps the moves it tried and the sizes it packed, after every batch
+    /// of moves. To resume a stopped search, start it again with the same --state and with
+    /// --config set to its --output
+    #[arg(long, value_name = "FILE")]
+    pub state: Option<PathBuf>,
+
+    /// Only print the size of the web output of each input with the start config
+    #[arg(long)]
+    pub eval: bool,
+}
+
+fn read_config(config: &Option<PathBuf>, size_profile: SizeProfile) -> Result<CompressConfig> {
+    let json = match config {
+        Some(path) => std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config: {}", path.display()))?,
+        None => match size_profile {
+            SizeProfile::FourK => DEFAULT_CONFIG_JSON,
+            SizeProfile::SixtyFourK => SIZE_64K_CONFIG_JSON,
+        }
+        .to_owned(),
+    };
+    serde_json::from_str(&json).context("Failed to parse config")
+}
+
+pub fn run_search(args: SearchArgs) -> Result<()> {
+    let start = read_config(&args.config, args.size_profile)?;
+    let mut demos = Vec::new();
+    for files in &args.inputs {
+        let files: Vec<String> = files.split(',').map(str::to_owned).collect();
+        let mut demo = read_demo(&files[0], &files[1..])?;
+        demo.layout.stream = choose_layout(&start, &demo)?;
+        demo.layout.encoded_len = stream_size(&start, &demo)?;
+        demos.push(demo);
+    }
+    if args.eval {
+        let mut total = 0;
+        for demo in &demos {
+            let (size, memory) = demo_eval(&start, demo)?;
+            println!("{size}\t{}\t(decoder memory about {} MB)", demo.name, memory / 1_000_000);
+            total += size;
+        }
+        println!("{total}\ttotal");
+        return Ok(());
+    }
+    let options = SearchOptions {
+        threads: args
+            .threads
+            .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get())),
+        batch: args.batch,
+        max_evals: args.max_evals,
+        max_memory: args.max_memory_mb * 1_000_000,
+        state: args.state.clone(),
+    };
+    let started = std::time::Instant::now();
+    let output = args.output.clone();
+    let (best, best_cost) = search(start, &demos, &options, |line, config| {
+        println!("[{:>6.0}s] {line}", started.elapsed().as_secs_f64());
+        if let Ok(json) = serde_json::to_string_pretty(config) {
+            let _ = std::fs::write(&output, json + "\n");
+        }
+    })?;
+    std::fs::write(&output, serde_json::to_string_pretty(&best)? + "\n")?;
+    let total = cost(&best, &demos)?;
+    println!("Best cost {best_cost} ({total}), config written to {}", output.display());
     Ok(())
 }

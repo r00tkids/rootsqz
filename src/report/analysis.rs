@@ -1859,7 +1859,9 @@ fn is_tool_section(name: &str) -> bool {
 fn config_has(config: &ModelConfig, f: impl Fn(&ModelConfig) -> bool + Copy) -> bool {
     f(config)
         || match config {
-            ModelConfig::Mixer { models } => models.iter().any(|m| config_has(m, f)),
+            ModelConfig::Mixer { models } | ModelConfig::ContextMixer { models, .. } => {
+                models.iter().any(|m| config_has(m, f))
+            }
             ModelConfig::AdaptiveProbabilityMap(m) => config_has(m, f),
             _ => false,
         }

@@ -37,6 +37,10 @@ impl<W: Write> Encoder<W> {
         })
     }
 
+    pub fn model(&self) -> &dyn Model {
+        self.model.as_ref()
+    }
+
     /// Records the predictions for the report, with those of the submodels if `submodels` is set.
     pub fn record(&mut self, submodels: bool) {
         self.recording = Some((Recording::default(), submodels));

@@ -83,7 +83,7 @@ export type RootsqzOptions = {
 
   /**
    * Embedded compression preset (`--size-profile`). The executable defaults to `4k`;
-   * `64k` adds a bounded match predictor for larger JavaScript inputs.
+   * `64k` adds models for larger inputs, whose decoder needs up to about 1 GB of memory.
    */
   sizeProfile?: "4k" | "64k";
 
@@ -138,6 +138,18 @@ export type RootsqzOptions = {
    * By default `"sliced"` with a loader script, otherwise `"serial"`.
    */
   decoder?: Decoder;
+
+  /**
+   * Search for the model config that packs the bundle smallest, counting the decoder bytes of
+   * each change. Takes about an hour for a 64k intro. `searchCache` names a directory that keeps
+   * the config found, so that a build of the same bundle reuses it; `searchThreads` sets how many
+   * configs are tried at once.
+   */
+  search?: boolean;
+  /** See `search`. */
+  searchThreads?: number;
+  /** See `search`. */
+  searchCache?: string;
 
   /**
    * Name of the global that the boot code of the executable puts the files in.
@@ -446,6 +458,9 @@ export default function (options: RootsqzOptions = {}): Plugin {
           report: wantsReport,
           loader: options.loader,
           decoder: options.decoder,
+          search: options.search,
+          searchThreads: options.searchThreads,
+          searchCache: options.searchCache,
           reportModels: options.reportModels,
           reportDetail: options.reportDetail,
           reportSourceMap,

@@ -34,7 +34,8 @@ impl<W: Write> ArithmeticEncoder<W> {
         assert!(self.high > self.low);
 
         let range = (self.high - self.low) as f64;
-        let mut mid = f64::mul_add(range, p, self.low as f64) as u32;
+        // Rounds like the JS decoder, which has no fused multiply-add
+        let mut mid = (self.low as f64 + range * p) as u32;
         if mid >= self.high {
             // We loose some precision to prevent overflow
             // But it's unlikely to happen in practice (p >= 1.0)
@@ -111,7 +112,7 @@ pub mod tests {
             assert!(self.high > self.low);
 
             let range = (self.high - self.low) as f64;
-            let mut mid = f64::mul_add(range, p, self.low as f64) as u32;
+            let mut mid = (self.low as f64 + range * p) as u32;
 
             if mid >= self.high {
                 mid = self.high - 1;

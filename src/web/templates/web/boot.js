@@ -22,7 +22,7 @@ let run = d => {
     {{#unless keep}}
     document.body.innerHTML = "";
     {{/unless}}
-    window.eval(new TextDecoder().decode(d.slice(0, {{{js_main_len}}})));
+    window.eval({{{main_js}}});
 };
 p.slice(o).arrayBuffer().then(b => {
     a = new Uint8Array(b);
@@ -61,7 +61,7 @@ p.slice(o).arrayBuffer().then(b => {
     rsqz = {
         files: {{{files_map}}}
     };
-    s = new TextDecoder().decode(d.slice(0, {{{js_main_len}}}));
+    s = {{{main_js}}};
     window.eval(s);
 });
 {{/if}}

@@ -1,18 +1,48 @@
+use super::context_map::{ContextStats, SharedTable};
 use super::utils::{prob_squash, prob_stretch, U24_MAX};
-use std::{
-    cell::RefCell,
-    ops::{Index, IndexMut},
-    rc::Rc,
-    vec,
-};
+use std::{collections::HashMap, vec};
 
 pub trait Model {
-    fn pred(&mut self) -> f64;
+    /// The stretched prediction of the next bit. A model with several mixer inputs returns the first.
+    fn pred(&mut self) -> f64 {
+        let mut inputs = Vec::new();
+        self.pred_inputs(&mut inputs);
+        inputs[0]
+    }
     fn learn(&mut self, bit: u8);
+
+    /// Appends the inputs that the model gives a mixer for the next bit, the same number for every bit
+    fn pred_inputs(&mut self, out: &mut Vec<f64>) {
+        out.push(self.pred());
+    }
 
     /// Appends the stretched predictions that the submodels made in the last `pred` call,
     /// depth first, in the order of `ModelConfig::submodel_names`. Used by the report.
     fn submodel_preds(&self, _out: &mut Vec<f32>) {}
+
+    /// A small number that tells what the model knows about the next bit, 0 for nothing.
+    /// Valid after `inputs`. `ContextMixer` selects its weights by it.
+    fn state(&self) -> u32 {
+        0
+    }
+
+    /// A context that the model offers `ContextMixer` to select weights by, below 2^16.
+    /// Valid after `inputs`.
+    fn context(&self) -> u32 {
+        0
+    }
+
+    /// Appends the inputs of a `ContextMixer`, which may be more than `pred_inputs`, the same
+    /// number for every bit
+    fn inputs(&mut self, out: &mut Vec<f64>) {
+        self.pred_inputs(out);
+    }
+
+    /// The mixer weight sets and weights that the model and its submodels have allocated, which
+    /// the decoder allocates too. Used by the search to estimate the memory of the decoder.
+    fn weights(&self) -> (usize, usize) {
+        (0, 0)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -26,19 +56,19 @@ impl Default for NOrderByteData {
 }
 
 impl NOrderByteData {
-    fn count(&self) -> u32 {
+    pub(crate) fn count(&self) -> u32 {
         (self.0 & 0xFF000000) >> 24
     }
 
-    fn prob(&self) -> i32 {
+    pub(crate) fn prob(&self) -> i32 {
         (self.0 & U24_MAX) as i32
     }
 
-    fn set_count(&mut self, new_count: u32) {
+    pub(crate) fn set_count(&mut self, new_count: u32) {
         self.0 = ((new_count << 24) & 0xFF000000) | self.0 & U24_MAX;
     }
 
-    fn set_prob(&mut self, new_prob: i32) {
+    pub(crate) fn set_prob(&mut self, new_prob: i32) {
         self.0 = (new_prob as u32 & U24_MAX) | (self.0 & 0xFF000000);
     }
 }
@@ -60,7 +90,7 @@ where
 {
     pub fn new(pow2_size: u32) -> Self {
         let context_size = (1 << pow2_size) as usize;
-        println!(
+        tracing::debug!(
             "Hash table Size: {} MiB",
             (size_of::<Record>() * context_size) / (1024 * 1024)
         );
@@ -76,10 +106,6 @@ where
         self.table.len()
     }
 
-    pub fn get<'a>(&'a self, key: u32) -> &'a Record {
-        &self.table[key as usize & self.hash_mask]
-    }
-
     pub fn get_mut<'a>(&'a mut self, key: u32) -> &'a mut Record {
         &mut self.table[key as usize & self.hash_mask]
     }
@@ -91,8 +117,7 @@ where
 /// (using characters as window filters)
 pub struct NOrderByte {
     ctx: u32,
-    hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
-    max_count: u32,
+    stats: ContextStats,
 
     magic_num: u32,
     prev_bytes: u64,
@@ -108,7 +133,7 @@ pub struct NOrderByte {
 impl NOrderByte {
     pub fn new_norder_model(
         byte_mask: u8,
-        hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+        hash_table: SharedTable,
         max_count: u32,
     ) -> Self {
         assert!(max_count <= 255);
@@ -122,8 +147,7 @@ impl NOrderByte {
             ctx: 0,
             bit_ctx: 1,
             magic_num: hash(byte_mask as u32, 2),
-            max_count: max_count,
-            hash_table: hash_table,
+            stats: ContextStats::new(hash_table, max_count),
             prev_bytes: 0,
             mask: bit_mask,
             is_word_model: false,
@@ -134,15 +158,14 @@ impl NOrderByte {
     }
 
     pub fn new_word_model(
-        hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+        hash_table: SharedTable,
         max_count: u32,
     ) -> Self {
         Self {
             ctx: 0,
             bit_ctx: 1,
             magic_num: hash(1337 as u32, 2),
-            max_count: max_count,
-            hash_table: hash_table,
+            stats: ContextStats::new(hash_table, max_count),
             prev_bytes: 2166136261,
             mask: u64::MAX,
             is_word_model: true,
@@ -154,7 +177,7 @@ impl NOrderByte {
 
     pub fn new_char_class_model(
         order: u8,
-        hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+        hash_table: SharedTable,
         max_count: u32,
     ) -> Self {
         assert!((1..=8).contains(&order));
@@ -163,8 +186,7 @@ impl NOrderByte {
             ctx: 0,
             bit_ctx: 1,
             magic_num: hash(0x434c4153 ^ order as u32, 2),
-            max_count,
-            hash_table,
+            stats: ContextStats::new(hash_table, max_count),
             prev_bytes: 0,
             mask: (1u64 << (order * 3)) - 1,
             is_word_model: false,
@@ -178,7 +200,7 @@ impl NOrderByte {
     /// as the bit model context. This differs from masking the recent bytes.
     pub fn new_indirect_model(
         context_bytes: u8,
-        hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+        hash_table: SharedTable,
         max_count: u32,
     ) -> Self {
         assert!((1..=3).contains(&context_bytes));
@@ -206,38 +228,21 @@ fn char_class(byte: u8) -> u8 {
 }
 
 impl Model for NOrderByte {
-    fn pred(&mut self) -> f64 {
-        let entry = self
-            .hash_table
-            .borrow()
-            .get(self.ctx ^ self.bit_ctx)
-            .clone();
+    fn state(&self) -> u32 {
+        self.stats.count()
+    }
 
-        prob_stretch(entry.prob() as f64 / U24_MAX as f64)
+    fn pred_inputs(&mut self, out: &mut Vec<f64>) {
+        self.stats.pred(self.ctx ^ self.bit_ctx, self.bit_ctx, out);
     }
 
     fn learn(&mut self, bit: u8) {
-        {
-            let mut hash_table = self.hash_table.borrow_mut();
-            let inst = hash_table.get_mut(self.ctx ^ self.bit_ctx);
-
-            let (mut count, mut prob) = (inst.count(), inst.prob());
-            if count < self.max_count {
-                count += 1;
-            }
-
-            let count_sqrt = count as f64 + 0.2;
-            // Learning function
-            prob += (U24_MAX as f64 * ((bit as f64 - (prob as f64 / U24_MAX as f64)) / count_sqrt))
-                as i32;
-
-            inst.set_count(count);
-            inst.set_prob(prob);
-        }
+        self.stats.update(bit);
 
         self.bit_ctx = (self.bit_ctx << 1) | bit as u32;
         if self.bit_ctx >= 256 {
             let current_byte = self.bit_ctx & 0xff;
+            self.stats.byte_end(current_byte);
 
             if let Some(transitions) = &mut self.transitions {
                 // A saturating vote keeps a stable candidate while allowing replacement.
@@ -256,8 +261,9 @@ impl Model for NOrderByte {
             } else if self.is_word_model {
                 let next_char = current_byte as u8 as char;
                 if next_char.is_ascii_alphanumeric() || matches!(next_char, '_' | '.' | '[' | ']') {
-                    self.prev_bytes = self.prev_bytes ^ next_char.to_ascii_lowercase() as u64;
-                    self.prev_bytes = self.prev_bytes.wrapping_mul(16777619) >> 16;
+                    // 32 bit FNV-1a, which the JS decoder computes with Math.imul
+                    self.prev_bytes = (self.prev_bytes as u32 ^ next_char.to_ascii_lowercase() as u32)
+                        .wrapping_mul(16777619) as u64;
                 } else {
                     self.prev_bytes = 2166136261;
                 }
@@ -288,8 +294,7 @@ impl Model for NOrderByte {
 /// Predicts bits from the position in a lexical token and the last delimiter.
 /// This state is independent of the Word model's rolling character hash.
 pub struct TokenPosition {
-    hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
-    max_count: u32,
+    stats: ContextStats,
     context_bytes: u8,
     max_position: u8,
     kind: u8,
@@ -303,7 +308,7 @@ pub struct TokenPosition {
 
 impl TokenPosition {
     pub fn new(
-        hash_table: Rc<RefCell<HashTable<NOrderByteData>>>,
+        hash_table: SharedTable,
         max_count: u32,
         context_bytes: u8,
         max_position: u8,
@@ -312,8 +317,7 @@ impl TokenPosition {
         assert!(context_bytes <= 2);
         assert!(max_position > 0);
         Self {
-            hash_table,
-            max_count,
+            stats: ContextStats::new(hash_table, max_count),
             context_bytes,
             max_position,
             kind: 0,
@@ -391,27 +395,220 @@ impl TokenPosition {
 }
 
 impl Model for TokenPosition {
-    fn pred(&mut self) -> f64 {
-        let entry = *self.hash_table.borrow().get(self.ctx ^ self.bit_ctx);
-        prob_stretch(entry.prob() as f64 / U24_MAX as f64)
+    fn state(&self) -> u32 {
+        self.stats.count()
+    }
+
+    fn pred_inputs(&mut self, out: &mut Vec<f64>) {
+        self.stats.pred(self.ctx ^ self.bit_ctx, self.bit_ctx, out);
     }
 
     fn learn(&mut self, bit: u8) {
-        {
-            let mut table = self.hash_table.borrow_mut();
-            let inst = table.get_mut(self.ctx ^ self.bit_ctx);
-            let count = (inst.count() + 1).min(self.max_count);
-            let mut prob = inst.prob();
-            prob += (U24_MAX as f64
-                * ((bit as f64 - prob as f64 / U24_MAX as f64) / (count as f64 + 0.2)))
-                as i32;
-            inst.set_count(count);
-            inst.set_prob(prob);
+        self.stats.update(bit);
+        self.bit_ctx = (self.bit_ctx << 1) | bit as u32;
+        if self.bit_ctx >= 256 {
+            let byte = (self.bit_ctx & 255) as u8;
+            self.stats.byte_end(byte as u32);
+            self.advance(byte);
+            self.bit_ctx = 1;
+        }
+    }
+}
+
+fn js_mix(a: u32, b: u32) -> u32 {
+    a.wrapping_mul(0x9E3779B1).wrapping_add(b)
+}
+
+/// One level of bracket nesting seen by `JsLexer`: its opening bracket, and the token before
+/// the last `:` in it, which is the key of a property in an object literal.
+#[derive(Clone, Copy, Default)]
+struct JsFrame {
+    open: u8,
+    key: u32,
+}
+
+/// Splits minified JavaScript into tokens, as far as `JsContext` needs it.
+/// Identifiers, numbers and strings are tokens, kept as hashes; other bytes are punctuation.
+pub struct JsLexer {
+    /// Quote of the string the lexer is in, or 0
+    quote: u8,
+    /// Class of the current token: 0 none, 1 identifier, 2 number, 3 string
+    kind: u8,
+    /// Hash of the current token so far
+    token: u32,
+    /// Hash of the last completed token
+    prev_token: u32,
+    /// Last punctuation byte
+    punct: u8,
+    /// Classes of the last tokens and the punctuation between them, one byte each
+    skeleton: u64,
+    frames: Vec<JsFrame>,
+    /// The token that followed each token the last time, by its hash
+    next_token: HashMap<u32, u32>,
+}
+
+impl JsLexer {
+    fn new() -> Self {
+        Self {
+            quote: 0,
+            kind: 0,
+            token: 0,
+            prev_token: 0,
+            punct: 0,
+            skeleton: 0,
+            frames: vec![JsFrame::default()],
+            next_token: HashMap::new(),
+        }
+    }
+
+    fn end_token(&mut self) {
+        if self.kind != 0 {
+            self.next_token.insert(self.prev_token, self.token);
+            self.prev_token = self.token;
+            self.skeleton = (self.skeleton << 8) | self.kind as u64;
+            self.kind = 0;
+        }
+    }
+
+    fn update(&mut self, c: u8) {
+        if self.quote != 0 {
+            // Escapes are not worth their bytes in the decoder
+            if c == self.quote {
+                self.quote = 0;
+                self.end_token();
+                return;
+            }
+            self.token = js_mix(self.token, c as u32);
+            return;
+        }
+        if c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || (c == b'.' && self.kind == 2) {
+            if self.kind == 0 {
+                self.kind = if c.is_ascii_digit() { 2 } else { 1 };
+                self.token = self.kind as u32;
+            }
+            self.token = js_mix(self.token, c as u32);
+            return;
+        }
+        self.end_token();
+        if matches!(c, b'"' | b'\'' | b'`') {
+            self.quote = c;
+            self.kind = 3;
+            self.token = 3;
+        } else if !matches!(c, b' ' | b'\t' | b'\n' | b'\r') {
+            self.punct = c;
+            self.skeleton = (self.skeleton << 8) | c as u64;
+            match c {
+                b'(' | b'[' | b'{' => {
+                    self.frames.push(JsFrame { open: c, key: 0 })
+                }
+                b')' | b']' | b'}' if self.frames.len() > 1 => {
+                    self.frames.pop();
+                }
+                b':' => self.frames.last_mut().unwrap().key = self.prev_token,
+                _ => {}
+            }
+        }
+    }
+
+    /// Hash of the context of a variant, for the byte after `last_byte`
+    fn context(&self, variant: u8, last_byte: u8) -> u32 {
+        let frame = self.frames.last().unwrap();
+        let token = if self.kind == 0 { 0 } else { self.token };
+        match variant {
+            // The bracket, property key and punctuation around the token
+            0 => js_mix(
+                js_mix(js_mix(token, frame.open as u32), frame.key),
+                self.punct as u32,
+            ),
+            // The token that followed the last token the last time
+            1 => js_mix(token, *self.next_token.get(&self.prev_token).unwrap_or(&0)),
+            // The last byte and the bracket nesting
+            2 => js_mix(
+                js_mix(token, last_byte as u32),
+                (frame.open as u32) << 8 | self.frames.len() as u32,
+            ),
+            // The classes of the last tokens and the punctuation between them
+            _ => js_mix(
+                js_mix(token, self.skeleton as u32),
+                (self.skeleton >> 32) as u32,
+            ),
+        }
+    }
+}
+
+const TEXT_RUN: u32 = 32;
+
+/// Predicts bits from a context that `JsLexer` derives from the tokens of JavaScript.
+pub struct JsContext {
+    stats: ContextStats,
+    variant: u8,
+    lexer: JsLexer,
+    /// Bytes since the last control byte below tab, which text does not have, up to `TEXT_RUN`
+    text_run: u32,
+    bit_ctx: u32,
+    ctx: u32,
+}
+
+impl JsContext {
+    pub fn new(
+        variant: u8,
+        hash_table: SharedTable,
+        max_count: u32,
+    ) -> Self {
+        assert!(max_count <= 255);
+        Self {
+            stats: ContextStats::new(hash_table, max_count),
+            variant,
+            lexer: JsLexer::new(),
+            text_run: 0,
+            bit_ctx: 1,
+            ctx: 0,
+        }
+    }
+}
+
+impl Model for JsContext {
+    fn state(&self) -> u32 {
+        self.stats.count()
+    }
+
+    fn pred_inputs(&mut self, out: &mut Vec<f64>) {
+        if self.text_run < TEXT_RUN {
+            return self.stats.pred_none(out);
+        }
+        self.stats.pred(self.ctx ^ self.bit_ctx, self.bit_ctx, out);
+    }
+
+    /// The bracket the lexer is in, the class of the token and the last punctuation
+    fn context(&self) -> u32 {
+        let lexer = &self.lexer;
+        let open = match lexer.frames.last().unwrap().open {
+            b'(' => 1,
+            b'[' => 2,
+            b'{' => 3,
+            _ => 0,
+        };
+        (open << 2 | lexer.kind as u32) << 8 | lexer.punct as u32
+    }
+
+    fn learn(&mut self, bit: u8) {
+        if self.text_run >= TEXT_RUN {
+            self.stats.update(bit);
         }
         self.bit_ctx = (self.bit_ctx << 1) | bit as u32;
         if self.bit_ctx >= 256 {
             let byte = (self.bit_ctx & 255) as u8;
-            self.advance(byte);
+            if self.text_run >= TEXT_RUN {
+                self.stats.byte_end(byte as u32);
+            }
+            self.text_run = if byte < 9 {
+                0
+            } else {
+                (self.text_run + 1).min(TEXT_RUN)
+            };
+            self.lexer.update(byte);
+            let h = js_mix(self.lexer.context(self.variant, byte), self.variant as u32);
+            self.ctx = (h ^ (h >> 15)).wrapping_mul(0x85EBCA6B) & !255;
             self.bit_ctx = 1;
         }
     }
@@ -509,14 +706,222 @@ impl Model for MatchPredictor {
     }
 }
 
-pub struct ModelWithWeight {
-    pub model: Box<dyn Model>,
-    pub weight: f64,
+/// Predicts the byte that followed an earlier occurrence of the last `min_len` bytes, found
+/// through a hash chain over the whole history. How far the expected bit is trusted is learnt per
+/// match length. After a mispredicted byte the match carries on, as data often differs from an
+/// earlier copy in a byte or two, until it mispredicts `MATCH_MAX_MISSES` bytes in a row.
+pub struct MatchModel {
+    history: Vec<u8>,
+    head: Vec<u32>,
+    chain: Vec<u32>,
+    min_len: usize,
+    candidates: u32,
+    expected_byte_context: bool,
+    second: bool,
+    /// Position in `history` of the expected byte, valid while `active`
+    match_ptr: usize,
+    active: bool,
+    /// Verified length of the match, 0 after a mispredicted byte
+    len: u32,
+    misses: u32,
+    byte_missed: bool,
+    partial_byte: u32,
+    counters: Vec<NOrderByteData>,
+    counter_idx: usize,
+    expected_bit: u8,
+    /// 0 if the model predicts nothing for the current bit, else 1 + the expected bit + 2 times
+    /// a bucket of the length: 0 after a mispredicted byte, else 1 + log2 of the length, up to 12
+    state: u32,
+}
+
+const MATCH_HASH_BITS: u32 = 22;
+const MATCH_MAX_MISSES: u32 = 8;
+const MATCH_MAX_LEN: u32 = 65535;
+
+impl MatchModel {
+    /// `candidates` is how many earlier occurrences are compared: the longest is taken, or with
+    /// `second` the most recent one that predicts another byte than the most recent occurrence.
+    /// `expected_byte_context` learns the trust per expected byte as well.
+    pub fn new(min_len: u32, candidates: u32, expected_byte_context: bool, second: bool) -> Self {
+        assert!((1..=32).contains(&min_len));
+        assert!(candidates >= 1);
+        Self {
+            history: Vec::new(),
+            head: vec![0; 1 << MATCH_HASH_BITS],
+            chain: vec![0],
+            min_len: min_len as usize,
+            candidates,
+            expected_byte_context,
+            second,
+            match_ptr: 0,
+            active: false,
+            len: 0,
+            misses: 0,
+            byte_missed: false,
+            partial_byte: 1,
+            // 64 length buckets, then one per number of misses
+            counters: vec![NOrderByteData::default(); (64 + MATCH_MAX_MISSES as usize) << 16],
+            counter_idx: 0,
+            expected_bit: 0,
+            state: 0,
+        }
+    }
+
+    fn bucket(&self) -> u32 {
+        let len = self.len;
+        if len == 0 {
+            63 + self.misses
+        } else if len < 16 {
+            len
+        } else {
+            // Four buckets per power of two
+            let log = 31 - len.leading_zeros();
+            16 + (log - 4) * 4 + ((len >> (log - 2)) & 3)
+        }
+    }
+
+    fn find_match(&mut self) {
+        let pos = self.history.len();
+        if pos < self.min_len {
+            self.chain.push(0);
+            return;
+        }
+        let mut hash: u32 = 0;
+        for &byte in &self.history[pos - self.min_len..] {
+            hash = (hash ^ byte as u32).wrapping_mul(0x2F0F3D1).wrapping_add(1);
+        }
+        let slot = (hash >> 8) as usize & ((1 << MATCH_HASH_BITS) - 1);
+        if self.len == 0 {
+            let mut candidate = self.head[slot] as usize;
+            let mut best_len = 0;
+            let mut best_ptr = 0;
+            let mut first_byte = None;
+            for _ in 0..self.candidates {
+                if candidate == 0 {
+                    break;
+                }
+                let mut len = 0;
+                while len < MATCH_MAX_LEN as usize
+                    && len < candidate
+                    && self.history[candidate - 1 - len] == self.history[pos - 1 - len]
+                {
+                    len += 1;
+                }
+                if self.second {
+                    if len >= self.min_len {
+                        match first_byte {
+                            None => first_byte = Some(self.history[candidate]),
+                            Some(byte) if byte != self.history[candidate] => {
+                                best_len = len;
+                                best_ptr = candidate;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                } else if len > best_len {
+                    best_len = len;
+                    best_ptr = candidate;
+                }
+                candidate = self.chain[candidate] as usize;
+            }
+            if best_len >= self.min_len {
+                self.len = best_len as u32;
+                self.match_ptr = best_ptr;
+                self.active = true;
+                self.misses = 0;
+            }
+        }
+        // chain[pos] links position pos to the previous position with the same hash
+        self.chain.push(self.head[slot]);
+        self.head[slot] = pos as u32;
+    }
+}
+
+impl Model for MatchModel {
+    fn pred(&mut self) -> f64 {
+        self.state = 0;
+        if !self.active || self.byte_missed {
+            return 0.;
+        }
+        let expected_byte = self.history[self.match_ptr];
+        self.expected_bit = (expected_byte >> (self.partial_byte.leading_zeros() - 24)) & 1;
+        let len_bucket = if self.len == 0 { 0 } else { (32 - self.len.leading_zeros()).min(12) };
+        self.state = 1 + self.expected_bit as u32 + 2 * len_bucket;
+        let context = if self.expected_byte_context {
+            expected_byte as usize
+        } else {
+            0
+        };
+        self.counter_idx = (((self.bucket() as usize) << 8) + context << 8) + self.partial_byte as usize;
+        let p = prob_stretch(self.counters[self.counter_idx].prob() as f64 / U24_MAX as f64);
+        if self.expected_bit == 1 {
+            p
+        } else {
+            -p
+        }
+    }
+
+    fn state(&self) -> u32 {
+        self.state
+    }
+
+    /// The prediction, and the expected bit as -1 or 1 times the length bucket of the state
+    fn inputs(&mut self, out: &mut Vec<f64>) {
+        let p = self.pred();
+        out.push(p);
+        let len_bucket = self.state.saturating_sub(1) / 2;
+        out.push(if self.expected_bit == 1 {
+            len_bucket as f64
+        } else {
+            -(len_bucket as f64)
+        });
+    }
+
+    fn learn(&mut self, bit: u8) {
+        if self.active && !self.byte_missed {
+            // Learns how often the expected bit is right
+            let inst = &mut self.counters[self.counter_idx];
+            let count = (inst.count() + 1).min(255);
+            let hit = (bit == self.expected_bit) as u8;
+            let mut prob = inst.prob();
+            prob += (U24_MAX as f64 * ((hit as f64 - prob as f64 / U24_MAX as f64) / (count as f64 + 0.2)))
+                as i32;
+            inst.set_count(count);
+            inst.set_prob(prob);
+            if hit == 0 {
+                self.len = 0;
+                self.misses += 1;
+                if self.misses < MATCH_MAX_MISSES {
+                    self.byte_missed = true;
+                } else {
+                    self.active = false;
+                }
+            }
+        }
+        self.partial_byte = (self.partial_byte << 1) | bit as u32;
+        if self.partial_byte >= 256 {
+            self.history.push(self.partial_byte as u8);
+            self.partial_byte = 1;
+            self.byte_missed = false;
+            if self.active {
+                if self.len != 0 {
+                    self.len = (self.len + 1).min(MATCH_MAX_LEN);
+                }
+                self.match_ptr += 1;
+            }
+            self.find_match();
+        }
+    }
 }
 
 pub struct LnMixerPred {
-    pub models_with_weight: Vec<ModelWithWeight>,
+    pub models: Vec<Box<dyn Model>>,
+    /// Inputs of the last `pred`, and the index of the first input of each model in them
     last_p: Vec<f64>,
+    first_input: Vec<usize>,
+    /// Weights independent of the context, one per input
+    model_weights: Vec<f64>,
     weights: Vec<Vec<Vec<f64>>>,
     prev_byte: u32,
     bit_ctx: u32,
@@ -533,19 +938,12 @@ impl LnMixerPred {
         context_learning_rate: f64,
         context_weight_scale: f64,
     ) -> Self {
-        let num_models = models.len();
-        let mut models_with_weight = Vec::new();
-        for model in models {
-            models_with_weight.push(ModelWithWeight {
-                model: model,
-                weight: 1. / num_models as f64, // Default weight, adjusted by learning later
-            });
-        }
-
         Self {
-            last_p: vec![0.; models_with_weight.len()],
+            first_input: vec![0; models.len()],
+            last_p: vec![],
+            model_weights: vec![],
             last_total_p: 0.,
-            models_with_weight: models_with_weight,
+            models,
             weights: vec![vec![vec![]; 255]; 256],
             bit_ctx: 1,
             prev_byte: 0,
@@ -558,24 +956,28 @@ impl LnMixerPred {
 
 impl Model for LnMixerPred {
     fn pred(&mut self) -> f64 {
+        self.last_p.clear();
+        for (i, model) in self.models.iter_mut().enumerate() {
+            self.first_input[i] = self.last_p.len();
+            model.pred_inputs(&mut self.last_p);
+        }
+        if self.model_weights.is_empty() {
+            // Default weight, adjusted by learning later
+            self.model_weights = vec![1. / self.last_p.len() as f64; self.last_p.len()];
+        }
+
+        let weights = &self.weights[self.prev_byte as usize][self.bit_ctx as usize - 1];
         let mut sum = 0.;
-
-        let weights = &mut self.weights[self.prev_byte as usize][self.bit_ctx as usize - 1];
-        let mut i = 0;
-        for model in &mut self.models_with_weight {
-            let model_weight = if weights.is_empty() {
+        for (i, p) in self.last_p.iter().enumerate() {
+            let weight = if weights.is_empty() {
                 // We don't have 1-order weight so just use the context independent weight
-                model.weight
+                self.model_weights[i]
             } else {
-                // Mix in 1-order weight with context independent weight
-                f64::mul_add(weights[i], self.context_weight_scale, model.weight)
+                // Mix in 1-order weight with context independent weight, without fused
+                // multiply-add, as the JS decoder can't fuse
+                weights[i] * self.context_weight_scale + self.model_weights[i]
             };
-
-            let p = model.model.pred();
-            self.last_p[i] = p;
-            sum += p * model_weight;
-
-            i += 1;
+            sum += p * weight;
         }
 
         self.last_total_p = prob_squash(sum);
@@ -586,23 +988,17 @@ impl Model for LnMixerPred {
         let weights = &mut self.weights[self.prev_byte as usize][self.bit_ctx as usize - 1];
 
         if weights.is_empty() {
-            weights.reserve(self.models_with_weight.len());
-            for i in 0..self.models_with_weight.len() {
-                weights.push(self.models_with_weight[i].weight);
-            }
+            weights.extend_from_slice(&self.model_weights);
         }
 
         let pred_err = bit as f64 - self.last_total_p;
 
-        let mut i = 0;
-        for model in &mut self.models_with_weight {
-            model.model.learn(bit);
-            let p = self.last_p[i];
-
-            model.weight += self.learning_rate * pred_err * p;
+        for model in &mut self.models {
+            model.learn(bit);
+        }
+        for (i, p) in self.last_p.iter().enumerate() {
+            self.model_weights[i] += self.learning_rate * pred_err * p;
             weights[i] += self.context_learning_rate * pred_err * p;
-
-            i += 1;
         }
 
         self.bit_ctx = (self.bit_ctx << 1) | bit as u32;
@@ -615,175 +1011,9 @@ impl Model for LnMixerPred {
     }
 
     fn submodel_preds(&self, out: &mut Vec<f32>) {
-        for (model, p) in self.models_with_weight.iter().zip(&self.last_p) {
-            out.push(*p as f32);
-            model.model.submodel_preds(out);
+        for (model, &first) in self.models.iter().zip(&self.first_input) {
+            out.push(self.last_p[first] as f32);
+            model.submodel_preds(out);
         }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct SSEPredData([NOrderByteData; 32]);
-
-impl Index<usize> for SSEPredData {
-    type Output = NOrderByteData;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index]
-    }
-}
-
-impl IndexMut<usize> for SSEPredData {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index]
-    }
-}
-
-pub struct AdaptiveProbabilityMap {
-    ctx: u32,
-    hash_table: HashTable<SSEPredData>,
-    max_count: u32,
-
-    current_prob_idx: usize,
-    next_prob_idx: usize,
-    current_prob_weight: f64,
-
-    prev_bytes: u64,
-    mask: u64,
-
-    bit_ctx: u32,
-
-    input_model: Box<dyn Model>,
-    last_input_p: f64,
-}
-
-impl AdaptiveProbabilityMap {
-    pub fn new(pow2_size: u32, input_model: Box<dyn Model>) -> AdaptiveProbabilityMap {
-        AdaptiveProbabilityMap {
-            ctx: 0,
-            hash_table: HashTable::<SSEPredData>::new(pow2_size),
-            max_count: 255,
-            current_prob_idx: 0,
-            next_prob_idx: 0,
-            current_prob_weight: 1.,
-
-            prev_bytes: 0,
-            mask: 0xffffff,
-
-            bit_ctx: 1,
-            input_model: input_model,
-            last_input_p: 0.,
-        }
-    }
-
-    fn update_counter(inst: &mut NOrderByteData, bit: u8, max_count: u32, weight: f64) {
-        if weight <= 0. {
-            return;
-        }
-
-        let (mut count, mut prob) = (inst.count(), inst.prob());
-        if count < max_count {
-            count += 1;
-        }
-
-        // Learning function
-        prob += (U24_MAX as f64
-            * weight
-            * ((bit as f64 - (prob as f64 / U24_MAX as f64)) / ((count + 30) as f64 + 1.5)))
-            as i32;
-        inst.set_count(count);
-        inst.set_prob(prob);
-    }
-}
-
-impl Model for AdaptiveProbabilityMap {
-    fn pred(&mut self) -> f64 {
-        let p = self.input_model.pred();
-        self.last_input_p = p;
-        let p_ptr = p.max(-8.).min(7.5) * 2.;
-        let p_idx_f = p_ptr.floor();
-        let p_idx_c = p_ptr.ceil();
-
-        let delta_f = p_ptr - p_idx_f;
-        let delta_c = p_idx_c - p_ptr;
-        if delta_f <= delta_c {
-            // Use floor
-            self.current_prob_idx = (p_idx_f as i32 + 16) as usize;
-            self.next_prob_idx = self.current_prob_idx + 1;
-            if self.next_prob_idx >= 32 {
-                self.next_prob_idx = 31;
-            }
-            self.current_prob_weight = 1. - delta_f;
-        } else {
-            // Use ceil
-            self.current_prob_idx = (p_idx_c as i32 + 16) as usize;
-            self.next_prob_idx = self.current_prob_idx - 1;
-            self.current_prob_weight = 1. - delta_c;
-        }
-
-        let counter1 = {
-            let counter1: &mut NOrderByteData =
-                &mut self.hash_table.get_mut(self.ctx ^ self.bit_ctx)[self.current_prob_idx];
-            if counter1.count() == 0 {
-                let prob = (prob_squash(p) * U24_MAX as f64) as i32 & U24_MAX as i32;
-                counter1.set_prob(prob);
-            }
-            counter1.clone()
-        };
-
-        let counter2 = {
-            let counter2: &mut NOrderByteData =
-                &mut self.hash_table.get_mut(self.ctx ^ self.bit_ctx)[self.next_prob_idx];
-            if counter2.count() == 0 {
-                let prob = (prob_squash(p) * U24_MAX as f64) as i32 & U24_MAX as i32;
-                counter2.set_prob(prob);
-            }
-            counter2.clone()
-        };
-
-        let new_p = self.current_prob_weight * (counter1.prob() as f64 / U24_MAX as f64)
-            + (1. - self.current_prob_weight) * (counter2.prob() as f64 / U24_MAX as f64);
-        prob_stretch(new_p)
-    }
-
-    fn learn(&mut self, bit: u8) {
-        {
-            let counters = self.hash_table.get_mut(self.ctx ^ self.bit_ctx);
-            Self::update_counter(
-                &mut counters[self.current_prob_idx],
-                bit,
-                self.max_count,
-                self.current_prob_weight,
-            );
-            if self.next_prob_idx != self.current_prob_idx {
-                Self::update_counter(
-                    &mut counters[self.next_prob_idx],
-                    bit,
-                    self.max_count,
-                    1. - self.current_prob_weight,
-                );
-            }
-        }
-
-        self.bit_ctx = (self.bit_ctx << 1) | bit as u32;
-        if self.bit_ctx >= 256 {
-            self.bit_ctx &= 0xff;
-
-            self.prev_bytes = ((self.prev_bytes << 8) | self.bit_ctx as u64) & self.mask;
-            // Remove the extra leading bit before using it in the ctx
-            self.ctx = hash((self.prev_bytes >> 32) as u32, 3)
-                .wrapping_mul(9)
-                .wrapping_add(hash(self.prev_bytes as u32, 3));
-
-            // Reset bit_ctx
-            self.bit_ctx = 1;
-        }
-
-        self.input_model.learn(bit);
-    }
-
-    fn submodel_preds(&self, out: &mut Vec<f32>) {
-        out.push(self.last_input_p as f32);
-        self.input_model.submodel_preds(out);
     }
 }
