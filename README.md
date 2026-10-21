@@ -1,12 +1,18 @@
 # rootsqz
-rootsqz is a tool for compressing and decompressing demo intros for the web. The current overhead is about 1.6 KiB, so it's primarily intended for 64KiB intros, though this may change in the future. 
-It's inspired by [Crinkler](https://github.com/runestubbe/Crinkler) and ZPaq series of compressors.
+rootsqz packs a JavaScript intro and its assets into one small, self-extracting HTML file. It's made for 64k intros, and has a preset for 4k intros too.
+
+It works like the compressors of [Crinkler](https://github.com/runestubbe/Crinkler), ZPAQ and paq8: a set of models predicts each bit from what came before, and the better they predict, the smaller the file.
 
 There is also a [Vite / Rollup plugin](#vite--rollup-plugin).
 
 ## Features
-- High compression ratio for JavaScript and binary assets - about 20% better than deflate-raw
-- Extensible for new compression strategies
+- 35–45% smaller than deflate on 64k intros, decoder included
+- Models made for JavaScript, WebAssembly and tables of numbers
+- A [search](#config-search) for the settings that pack your intro smallest
+- A [report](#compression-report) of where the bytes go, which coding agents can read too
+- An optional [loader](#loader), and decoding in a [web worker](#decoder)
+
+The decoder itself takes about 1.4 KB with the `4k` preset and 3–4 KB with `64k`. So a very small input comes out larger than it went in.
 
 ## Installation
 
@@ -34,76 +40,36 @@ This installs a prebuilt executable for macOS (arm64, x64), Linux (arm64, x64) o
      ```
 
 ## Usage
-
-Basic compression example:
 ```sh
-rootsqz --js-main examples/cli/index.js -f examples/cli/bundled.glsl --output-directory out
+rootsqz --js-main index.js -f shader.glsl -o out
 ```
+This packs `index.js` and `shader.glsl` into `out/index.html`.
 
-Pass `--brotli` to append a Brotli stream to the single `index.html` for web
-inputs of any size.
-The browser decodes it with `DecompressionStream('brotli')`. This works in
-Firefox 147+ and Safari 18.4+. As of September 2026, Chrome does not support
-Brotli in `DecompressionStream`, so the arithmetic compressor remains the
-default for browser compatibility.
+The main options:
+- `-j, --js-main <FILE>`: your main JavaScript file.
+- `-f, --file <FILE>`: a file to pack with it. Repeat it for more files, and put similar files next to each other.
+- `-p, --pre-compressed-file <FILE>`: a file that is already compressed, like a JPEG, stored as it is.
+- `-o, --output-directory <DIR>`: where `index.html` goes.
+- `--size-profile <64k|4k|64k-wasm>`: the preset. `64k` is the default; its decoder needs up to about 1 GB of memory. `4k` has a smaller decoder for small intros. `64k-wasm` is `64k` plus models for WebAssembly; use it when your intro has a large wasm file.
+- `--search`: find the settings that pack your intro smallest. See [Config search](#config-search).
+- `--loader` and `--decoder`: show something while the intro unpacks. See [Loader](#loader) and [Decoder](#decoder).
+- `-r, --report`: write a report of where the bytes go. See [Compression report](#compression-report).
+- `--brotli`: use Brotli, which the browser unpacks itself. Smaller decoder, worse compression, and only Firefox 147+ and Safari 18.4+ support it (not Chrome, as of September 2026).
 
-Long base64 strings in the main JavaScript, such as fonts or wasm modules in data URLs, are compressed as the bytes they encode, and the decoder encodes them again with `btoa`.
+`rootsqz --help` lists all options.
 
-Binary files given with `--file` get models for fixed-size records, such as tables of numbers, in the parts of the files where a trial compression shows that they pay for their decoder code.
+Your files are available at runtime as `rsqz.files["name"]`, see [Runtime API](#runtime-api).
 
-Options:
-- `--js-main <file>`: Entry point JavaScript file
-- `--file <FILE>`, `-f`: Extra file to be compressed. Repeat the option for each file. Order matters, so files of similar content should be ordered together.
-- `--pre-compressed-file <FILE>`, `-p`: Extra file that is already compressed (jpeg, mp4 etc.) and is stored as it is. Repeat the option for each file.
-- `--output-directory <dir>`: Output directory for compressed files
-- `--size-profile <4k|64k|64k-wasm>`: Embedded compression preset (default: `4k`). The `64k` preset adds `Match` models that find repeats anywhere in larger inputs, contexts from the tokens, brackets and object keys of the JavaScript, and a `ContextMixer`; its decoder needs up to about 1 GB of memory. `64k-wasm` is the `64k` preset with context models for WebAssembly files given with `--file`; use it when the intro has a large wasm module.
-- `--brotli`: Use native Brotli decoding for web inputs (Firefox 147+ / Safari 18.4+).
-- `--config <file.json>`: Use a complete JSON `CompressConfig` instead of the embedded preset. This takes precedence over `--size-profile`.
-- `--loader <spinner|bar|progress>`, `--loader-html <file>`, `--loader-js <file>`, `--loader-keep`: Show a loader while the web output decompresses, see [Loader](#loader).
-- `--decoder <serial|sliced|worker>`: How the web output decodes, see [Decoder](#decoder).
-- `--search`: Search for the model config that packs this input smallest, starting from `--config` or the `--size-profile` preset, see [Config search](#config-search). `--search-threads <N>` sets how many configs it tries at the same time, and `--search-cache <DIR>` keeps the config it found, to reuse it when the same input is packed again.
-- `--report`, `-r`: Write a [compression report](#compression-report) to `report/` in the output directory.
-- `--report-models`: Also record what every submodel predicted (implies `--report`).
-- `--report-detail <VIEW,...>`: Also write these views of the report as TSV files, e.g. `lines,tokens` (implies `--report`).
-- `--report-source-map <FILE>`: Source map of the main JavaScript, to map its costs back to the original source files and lines (implies `--report`).
-- `--report-label <FILE>=<LABEL>`: Name of a file in the report, e.g. the module it was made from. Repeat the option for each file (implies `--report`).
-- `--report-wasm-debug <FILE>=<DEBUG>`: Debug info of a WebAssembly `--file`: the file before stripping, with its name section and DWARF, or a wasm source map (`.wasm.map`). Without it, `x.debug.wasm` and `x.wasm.map` next to `x.wasm` are used (implies `--report`).
-- See `rootsqz --help` for more CLI options
-
-All presets are available for `web` and `node` targets. To customize a model, copy [the 4k preset](src/compressor/default_config.json), [the 64k preset](src/compressor/size_64k_config.json) or [the 64k-wasm preset](src/compressor/size_64k_wasm_config.json), edit its `model.models` array, and pass it with `--config`. Supported optional model entries include `{"type":"CharClass","order":3}`, `{"type":"TokenPosition"}`, `{"type":"MatchPredictor","context_bytes":2,"confidence":0.97,"table_bits":16}`, `{"type":"Match","min_len":6}` (also `candidates`, `expected_byte_context` and `second`), `{"type":"IndirectByte","context_bytes":2,"max_count":15}`, and `{"type":"JsContext","variant":0}` (variants 0 to 3: the bracket, object key and punctuation around a token, the token that followed the previous token before, the last byte and the bracket nesting, and the sequence of token classes and punctuation). The decoder is generated from the selected config. `static_model_params.count_offset` (default `0.2`) sets how fast the counters of the context models learn: each moves by 1 / (count + `count_offset`) towards the bit.
-
-The 64k preset mixes its models with a `ContextMixer`, paq8-style. Its `selectors` each choose a set of weights by a context: `"None"` (one set), `"Order1"` (the previous byte), `"Known"` (how many models know their context), `{"State": i}` (the state of model `i` of `models`, such as the expected bit and length of a `Match`) and `{"Context": i}` (the context that model `i` offers: a `JsContext` offers the bracket, token class and punctuation, other models 0). A final weight set mixes their outputs. Its `apms` refine the result by `"Order0"`, `"Order1"`, `"Order2"` (hashed to `bits` bits), `{"State": i}` or `{"Context": i}`, and their probabilities are averaged with the mixer's by their `weight`. It takes all the inputs of each model; `static_model_params.context_input_scale` (default `1`) multiplies those of the context models, which the ContextMixer wants larger than the `Mixer`. When you add or remove models of a `ContextMixer`, keep the indexes `i` in its selectors and APMs pointing at the right models.
+### Your own settings
+The presets are JSON files: [4k](src/compressor/default_config.json), [64k](src/compressor/size_64k_config.json) and [64k-wasm](src/compressor/size_64k_wasm_config.json). To change one, copy it, edit it, and pass it with `--config`. The decoder is generated from the config, so it only contains the models you use. [docs/config.md](docs/config.md) describes the models and settings, but usually it's easier to let `--search` do this.
 
 ### Config search
-`--search` tries changes to the config one at a time: a changed context mask, count limit, match length, learning rate, `context_input_scale` or table size, a model added or removed, all models of a type removed, a `ContextMixer` selector or APM added or removed or an APM's limit, weight or hash size changed, and for WebAssembly files and record ranges, changes to their models, with the WebAssembly models of the `64k-wasm` preset added if the config has none. It skips changes after which the decoder would need more than 1 GB of memory, by an estimate. It keeps a change that makes the output smaller, counting the bytes that the change adds to or takes out of the decoder, until no change helps. So a model type that does not pay for its code in the decoder on an input is left out of its output. It takes about an hour for a 64k intro. The config it found is written to `search_config.json` in the output directory; pass it with `--config` to pack again without searching. The result does not depend on `--search-threads`.
+`--search` tries small changes to the settings, one at a time, and keeps each one that makes the output smaller, decoder included. Models that cost more decoder code than they save are dropped. It takes about an hour for a 64k intro. The result is saved as `search_config.json`; pass it with `--config` to build again without searching, or set `--search-cache <DIR>` to reuse it automatically.
 
-`rootsqz search -i main.js,data.bin -o config.json` runs the same search without packing, writing the best config so far after each improvement. Give `-i` once per demo (the main JavaScript, then its files, separated by commas) to find one config for all of them; `--eval` prints the size of each demo with the `--config` given, and the estimated memory of its decoder. `--max-memory-mb` sets the memory limit (default 1000). With `--state <FILE>` it keeps the changes it tried and the sizes it packed in that file; to resume a stopped search, run it again with the same `--state` and `--config` set to its `-o` file.
+To search without building, or to find one config for several intros, use `rootsqz search`. See [docs/config.md](docs/config.md#search).
 
 ## Compression report
-`--report` writes a report of where the bytes go to `report/` in the output directory. It covers the whole compressed stream: the main JavaScript and every `--file`, in the order they are compressed.
-
-- `report.json`: a summary for analysis by people, scripts or an LLM. It has the totals, the layout of the output file, the cost of every input file, the cost by token kind, the most expensive places (hotspots, identifiers, numbers, repeated strings), suggestions with what to look at next, and the model config. Its `about` entry explains how to read it.
-- `report.html`: the input colored by the cost of each byte. Hover over a byte for details, click a suggestion to show it. Collapse files, dim cheap bytes, search with `/`, and jump with the strip on the right. With a source map, the Sources view shows the original files colored by cost.
-- `data.bin`: what the model predicted for every bit, read by `rootsqz report`.
-- `AGENTS.md`: a guide to this report for coding agents.
-
-The cost of a byte is the number of bits the compressor spends on it, so the costs add up to the size of the compressed stream. A byte costs less when similar bytes came before it, also in earlier files.
-
-`rootsqz report <dir>` prints a view of a report as tab separated rows, so that you or an agent can look at exactly the part that matters:
-```sh
-rootsqz report out --view hotspots --top 20                # the most expensive 32 byte windows
-rootsqz report out --view token-totals --kind ident --top 30
-rootsqz report out --view tokens --range 1200..1400       # byte offsets in the decompressed stream
-rootsqz report out --view lines --section shader.glsl --sort bits
-rootsqz report out --view bits --range 1200..1201 --models
-```
-The views are `summary`, `sections`, `lines`, `blocks`, `hotspots`, `tokens`, `token-totals`, `bytes`, `bits`, `repeats`, `models`, `sources`, `source-lines`, `wasm-sections`, `wasm-functions`, `wasm-instructions`, `wasm-opcode-totals` and `suggestions`; `rootsqz report --help` lists the filters. `--report-detail` writes the same views as files at compress time.
-
-With `--report-source-map`, the report tells which original source files and lines the bytes of a bundled main JavaScript come from (`--view sources`, `--view source-lines`, `--source`). The [plugin](#vite--rollup-plugin) passes the source map and the module names of the imported files by itself.
-
-WebAssembly files given with `--file` are parsed: the views `wasm-sections`, `wasm-functions`, `wasm-instructions` and `wasm-opcode-totals` tell what each section, function, data segment and opcode costs, and `hotspots` and `bytes` name the function and instruction of each row. The suggestions point out custom sections of compilers and tools left in the file, LEB128 numbers that are longer than needed (wasm-ld writes them so; wasm-opt fixes it), and the most expensive functions. The report names functions from a name section, and maps them to source lines with DWARF line info (e.g. from `-g`) or a wasm source map. Since you would ship the stripped file, give it the file before stripping with `--report-wasm-debug x.wasm=x.debug.wasm`, or put `x.debug.wasm` or `x.wasm.map` next to `x.wasm`. Functions whose code differs from the debug file get no names or lines. `report.html` has a Wasm tab.
-
-With `--report-models`, the report also tells what each submodel of the mixer alone would have cost, for every byte and in total (`--view models`, `--models`). This helps to tune a `--config`. It needs 32 bytes of memory and disk per input byte and submodel.
+`--report` writes a report to `report/` in the output directory. Open `report.html` to see your input colored by how many bits each byte costs, with suggestions for what to change. `rootsqz report <dir>` prints the details, such as the most expensive parts or the cost of each wasm function. See [docs/report.md](docs/report.md).
 
 ### For coding agents
 Coding agents such as Claude Code or Codex can make and read the report themselves. Install the agent skill into your project:
@@ -121,7 +87,7 @@ To access the contents of files specified with `--file` or `--pre-compressed-fil
 Note: `<FILENAME>` refers to the base name of the file, not its full or relative path.
 
 ## Loader
-The web output can show a loader while it decompresses. Without loader options, the output is the same as before, not a byte larger.
+The web output can show a loader while it decompresses. Without loader options, it has no loader code.
 
 - `--loader spinner`: A spinning ring. By default, the decoder runs in one go.
 - `--loader bar`: A progress bar. By default, the decoder runs in slices.
@@ -147,7 +113,7 @@ How it works: by default, the decoder blocks the main thread, and the browser pa
 - `sliced`: On the main thread, in slices of about 12 ms, so the page repaints between them and a loader script gets progress. The default with `--loader-js`, `--loader bar` and `--loader progress`.
 - `worker`: In a web worker, made from the decoder in the boot code, so the main thread stays free: the page stays responsive, any loader animates smoothly, and a loader script gets progress. It adds about 120 bytes without a loader, and about the same as `sliced` with one.
 
-Without `--decoder`, the output is the same as before. `--decoder` is only for the `web` target without `--brotli`.
+`--decoder` is only for the `web` target without `--brotli`.
 
 ## Vite / Rollup plugin
 [`@r00tkids/rollup-plugin-rootsqz`](packages/rollup-plugin-rootsqz) runs rootsqz on the bundle, so a Vite or Rollup project builds straight to one compressed HTML file.
@@ -235,12 +201,9 @@ The tag starts the release workflow. It builds the executables for all targets, 
 
 Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): each package names this repository and `release.yml` as its trusted publisher on npmjs.com, so no npm token is stored. A new package cannot have a trusted publisher before it exists, so its first version needs a token (as the repository secret `NPM_TOKEN`, passed to the publish step as `NODE_AUTH_TOKEN`) or a manual `npm publish`. Afterwards, configure its trusted publisher with `npm trust github @r00tkids/<name> --file release.yml --repo r00tkids/rootsqz --allow-publish` and remove the token again.
 
-## TODO
-- [ ] Support larger hashmaps (>256 MiB)
-- [ ] Add support for custom loading bar JS hook
-
 ## References
 - [ZPAQ Compression Algorithm](https://mattmahoney.net/dc/zpaq_compression.pdf)
+- [PAQ8](https://mattmahoney.net/dc/paq.html), whose ContextMixer and APMs the 64k presets follow
 - [Crinkler](https://github.com/runestubbe/Crinkler)
 - [About arithmetic coders and recip_arith in particular](https://cbloomrants.blogspot.com/2018/10/about-arithmetic-coders-and-reciparith.html)
 - [Rant on New Arithmetic Coders](https://cbloomrants.blogspot.com/2008/10/10-05-08-5.html)
