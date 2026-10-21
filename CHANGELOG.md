@@ -6,6 +6,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-21
+
 ### Added
 - `--search` searches for the model config that packs the input smallest before packing, counting the bytes each change adds to or takes out of the decoder, and writes the config it found to `search_config.json` in the output directory. It can drop a model type whose decoder code does not pay for itself on the input, and tries the context models of WebAssembly files of the `64k-wasm` preset, and tunes them. `--search-threads` and `--search-cache` set how many configs it tries at once and where it keeps the result for the next build. `rootsqz search` runs the search alone, also for one config over several demos. The Node API and the plugin have the options `search`, `searchThreads` and `searchCache`.
 - The config option `static_model_params.count_offset` (default `0.2`) sets how fast the counters of the context models learn: each moves by 1 / (count + `count_offset`) towards the bit.
@@ -157,6 +159,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.11.0]: https://github.com/r00tkids/rootsqz/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/r00tkids/rootsqz/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/r00tkids/rootsqz/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/r00tkids/rootsqz/compare/v0.8.0...v0.9.0
