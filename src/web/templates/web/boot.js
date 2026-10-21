@@ -1,3 +1,9 @@
+{{#if boot_js}}
+// --boot-js and --title, before anything else
+(() => {
+{{{boot_js}}}
+})();
+{{/if}}
 {{#if worker}}
 // The decoder runs in a web worker, made from the source text of this function
 let w = new Worker(URL.createObjectURL(new Blob(["(" + (() => {

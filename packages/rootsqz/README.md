@@ -66,6 +66,12 @@ await compress({
      * By default "sliced" with a loader script, otherwise "serial".
      */
     decoder: 'worker',
+
+    /**
+     * Title of the web page, and a script that runs first, before the loader and decompression.
+     */
+    title: 'My intro',
+    bootJs: 'boot.js',
 });
 ```
 

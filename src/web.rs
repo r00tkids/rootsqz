@@ -119,6 +119,15 @@ pub struct Args {
     #[arg(long, value_enum, value_name = "DECODER")]
     pub decoder: Option<Decoder>,
 
+    /// Title of the web page, set before the web output decompresses
+    #[arg(long, value_name = "TEXT")]
+    pub title: Option<String>,
+
+    /// JavaScript run first in the web output, before the loader and decompression, e.g. to set
+    /// up the page. It is minified with the boot code
+    #[arg(long, value_name = "FILE")]
+    pub boot_js: Option<PathBuf>,
+
     /// Search for the model config that packs the input smallest, starting from --config or the
     /// --size-profile preset, before packing. Takes minutes to hours; the decoder is generated
     /// from the config found. The best config so far is written to search_config.json in the
@@ -160,6 +169,25 @@ impl Args {
             None if loader.is_some_and(|loader| loader.js.is_some()) => Ok(Decoder::Sliced),
             None => Ok(Decoder::Serial),
         }
+    }
+
+    /// The script that runs first in the web output: --title, then --boot-js.
+    fn boot_js(&self) -> Result<Option<String>> {
+        let mut js = String::new();
+        if let Some(title) = &self.title {
+            js += &format!("document.title = {};\n", serde_json::to_string(title)?);
+        }
+        if let Some(path) = &self.boot_js {
+            js += &std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read boot script: {}", path.display()))?;
+        }
+        if js.is_empty() {
+            return Ok(None);
+        }
+        if self.target != output_generator::Target::Web {
+            bail!("--title and --boot-js are only supported for the web target");
+        }
+        Ok(Some(js))
     }
 
     /// The loader given by the options, or `None` without loader options.
@@ -525,6 +553,7 @@ fn search_config(args: &Args, start: CompressConfig, start_json: &str) -> Result
 pub fn run(args: Args) -> Result<()> {
     let loader = args.loader()?;
     let decoder = args.decoder(loader.as_ref())?;
+    let boot_js = args.boot_js()?;
     let main_js_bytes = std::fs::read(&args.js_main)
         .with_context(|| format!("Failed to read JS main file: {}", args.js_main))?;
     if args.brotli {
@@ -555,6 +584,7 @@ pub fn run(args: Args) -> Result<()> {
             Path::new(&args.output_directory),
             &main_js_bytes,
             &files,
+            boot_js.as_deref(),
         );
     }
 
@@ -714,6 +744,7 @@ pub fn run(args: Args) -> Result<()> {
             layout,
             loader,
             decoder,
+            boot_js,
             base64: base64_runs.map(|runs| output_generator::Base64Runs {
                 marker: runs.marker,
                 lengths: runs.decoded.iter().map(Vec::len).collect(),

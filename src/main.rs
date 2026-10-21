@@ -423,6 +423,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 static_model_params: model_config.static_model_params.clone(),
                 loader: None,
                 decoder: Decoder::Serial,
+                boot_js: None,
                 layout: StreamLayout::default(),
                 base64: Some(output_generator::Base64Runs {
                     marker: runs.marker,
@@ -557,6 +558,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 layout: StreamLayout::default(),
                 loader: None,
                 decoder: Decoder::Serial,
+                boot_js: None,
                 base64: None,
             },
             input_bytes.len(),
@@ -617,6 +619,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 layout: StreamLayout::default(),
                 loader: None,
                 decoder: Decoder::Serial,
+                boot_js: None,
                 base64: None,
             },
             input.len(),
@@ -666,6 +669,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 layout: StreamLayout::default(),
                 loader: None,
                 decoder: Decoder::Serial,
+                boot_js: None,
                 base64: None,
             },
             input_bytes.len(),
@@ -680,7 +684,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
         .expect("Failed to render output");
     }
 
-    /// Renders the web output with every decoder, with and without a loader script
+    /// Renders the web output with every decoder, with and without a loader script and a boot script
     #[test]
     pub fn web_decoders() {
         let model_config = create_default_compress_config();
@@ -710,6 +714,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                         layout: StreamLayout::default(),
                         loader,
                         decoder,
+                        boot_js: with_loader.then(|| "document.title = 'x';".to_owned()),
                         base64: None,
                     },
                     input.len(),
@@ -863,6 +868,7 @@ decompressSliced(model, new Uint8Array(fs.readFileSync(import.meta.dirname + "/i
                 layout: StreamLayout::default(),
                 loader: None,
                 decoder: Decoder::Serial,
+                boot_js: None,
                 base64: None,
             },
             input_bytes.len(),

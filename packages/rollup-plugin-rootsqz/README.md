@@ -50,6 +50,7 @@ Notes:
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
 - To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](https://github.com/r00tkids/rootsqz#loader). To keep the page responsive while it decodes, set `decoder: "worker"`, see [Decoder](https://github.com/r00tkids/rootsqz#decoder).
+- `title: "My intro"` sets the page title before the output decompresses, and `bootJs: "boot.js"` runs a script first, see [Title and boot script](https://github.com/r00tkids/rootsqz#title-and-boot-script).
 - `search: true` searches for the model config that packs the bundle smallest before packing, see [Config search](https://github.com/r00tkids/rootsqz#config-search). It takes about an hour for a 64k intro, so set `searchCache` to a directory that keeps the config found for the next build of the same bundle. It also keeps the progress there, so a stopped build continues the search; Vite empties `dist`, so without `searchCache` a stopped search starts over.
 - With `report: true`, or with the environment variable `ROOTSQZ_REPORT=1` (e.g. `ROOTSQZ_REPORT=1 vite build`), the plugin writes a [compression report](https://github.com/r00tkids/rootsqz#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set. For an imported `x.wasm`, it gives the report `x.debug.wasm` (the unstripped file) or `x.wasm.map` next to it as debug info, or the file that `reportWasmDebug: { 'src/x.wasm': 'build/x.full.wasm' }` names, so the report names its functions and maps them to source lines. Run `npx rootsqz install-skill` once to teach coding agents to use it ([For coding agents](https://github.com/r00tkids/rootsqz#for-coding-agents)).
 
@@ -123,6 +124,17 @@ rootsqz({
      * See https://github.com/r00tkids/rootsqz#decoder
      */
     decoder: "worker",
+
+    /**
+     * Title of the page, set before the output decompresses.
+     */
+    title: "My intro",
+
+    /**
+     * File with JavaScript that runs first, before the loader and decompression, e.g. to set
+     * up the page. It is not bundled, but minified with the boot code.
+     */
+    bootJs: "boot.js",
 
     /**
      * Search for the model config that packs the bundle smallest, counting the decoder bytes of

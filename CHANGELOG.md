@@ -7,6 +7,7 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 ## [Unreleased]
 
 ### Added
+- `--title <TEXT>` sets the page title of the web output before it decompresses, and `--boot-js <FILE>` runs a script first, before the loader and decompression. The Node API and the plugin have them as `title` and `bootJs`. Outputs without them are unchanged.
 - The plugin writes the compression report when the environment variable `ROOTSQZ_REPORT` is set (e.g. `ROOTSQZ_REPORT=1 vite build`), without a change to the build config. `0` and `false` leave it off.
 
 ## [0.13.0] - 2026-10-21

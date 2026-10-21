@@ -27,6 +27,8 @@ pub struct OutputGenerationOptions {
     pub loader: Option<Loader>,
     /// How the web output decodes
     pub decoder: Decoder,
+    /// Script run first in the web output, before the loader and decoding
+    pub boot_js: Option<String>,
     /// Base64 runs taken out of the main JavaScript, which the decoder puts back
     pub base64: Option<Base64Runs>,
 }
@@ -504,7 +506,18 @@ pub fn render_brotli_output(
     output_dir: &Path,
     main_js: &[u8],
     files: &[FileWithContent],
+    boot_js: Option<&str>,
 ) -> Result<()> {
+    // The script runs before the fetch, minified, as the Brotli header is not compressed
+    let boot_js = match boot_js {
+        Some(js) => uglify_src(&format!("(() => {{\n{js}\n}})();"))
+            .context("Failed to minify the boot script")?
+            .trim_end()
+            .trim_end_matches(';')
+            .to_owned()
+            + ";",
+        None => String::new(),
+    };
     fs::create_dir_all(output_dir).context("Failed to create output directory")?;
     let mut source = main_js.to_vec();
     let mut files_map = Vec::new();
@@ -539,6 +552,7 @@ pub fn render_brotli_output(
             &json!({
                 "offset": offset,
                 "end": offset + compressed.len(),
+                "boot_js": boot_js,
                 "js_len": main_js.len(),
                 "files_map": format!("{{{}}}", files_map.join(",")),
             }),
@@ -585,6 +599,7 @@ pub fn render_output(
         layout,
         loader,
         decoder,
+        boot_js,
         base64,
     } = output_options;
 
@@ -675,6 +690,7 @@ pub fn render_output(
                 &main_js_source(js_main_len, base64.as_ref()),
                 loader.as_ref(),
                 decoder,
+                boot_js.as_deref(),
             )?;
 
             let html_header_str = html_header(deflated_code.len())?;
@@ -821,6 +837,7 @@ fn boot_code(
     main_js: &str,
     loader: Option<&Loader>,
     decoder: Decoder,
+    boot_js: Option<&str>,
 ) -> Result<(String, Vec<u8>)> {
     let decompressor_code = Handlebars::new()
         .render_template(
@@ -840,13 +857,14 @@ fn boot_code(
                 "keep": loader.is_some_and(|loader| loader.keep),
                 "sliced": decoder == Decoder::Sliced,
                 "worker": decoder == Decoder::Worker,
+                "boot_js": boot_js,
             }),
         )
         .context("Failed to render decompression code template")?;
 
-    // The loader JavaScript is part of the boot code, so a syntax error in it fails here
+    // The loader and boot scripts are part of the boot code, so a syntax error in them fails here
     let decompressor_code_ugly = uglify_src(&decompressor_code)
-        .context("Failed to minify the boot code, including the loader JavaScript")?;
+        .context("Failed to minify the boot code, including the loader and boot scripts")?;
 
     info!(
         "Decompression code size before deflate: {}",
@@ -907,6 +925,7 @@ pub fn web_overhead(
         &main_js_source(layout.js_main_len, layout.base64.as_ref()),
         None,
         Decoder::Serial,
+        None,
     )?;
     Ok(html_header(deflated_code.len())?.len() + deflated_code.len())
 }

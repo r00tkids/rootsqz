@@ -143,6 +143,18 @@ export type RootsqzOptions = {
   decoder?: Decoder;
 
   /**
+   * Title of the page, set before the output decompresses (`--title`).
+   */
+  title?: string;
+
+  /**
+   * File with JavaScript that runs first in the output, before the loader and decompression,
+   * e.g. to set up the page (`--boot-js`). It is not bundled, but minified with the boot code.
+   * The path is relative to the working directory.
+   */
+  bootJs?: string;
+
+  /**
    * Search for the model config that packs the bundle smallest, counting the decoder bytes of
    * each change. Takes about an hour for a 64k intro. `searchCache` names a directory that keeps
    * the config found, so that a build of the same bundle reuses it; `searchThreads` sets how many
@@ -462,6 +474,8 @@ export default function (options: RootsqzOptions = {}): Plugin {
           report: wantsReport,
           loader: options.loader,
           decoder: options.decoder,
+          title: options.title,
+          bootJs: options.bootJs,
           search: options.search,
           searchThreads: options.searchThreads,
           searchCache: options.searchCache,

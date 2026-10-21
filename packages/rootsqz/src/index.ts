@@ -266,6 +266,17 @@ export type CompressOptions = RunOptions & {
   decoder?: Decoder;
 
   /**
+   * Title of the web page (`--title`), set before the web output decompresses.
+   */
+  title?: string;
+
+  /**
+   * File with JavaScript that runs first in the web output (`--boot-js`), before the loader and
+   * decompression, e.g. to set up the page. It is minified with the boot code.
+   */
+  bootJs?: string;
+
+  /**
    * Search for the model config that packs the input smallest (`--search`), starting from `config`
    * or the `sizeProfile` preset. Takes about an hour for a 64k intro; the config found is written
    * to `search_config.json` in the output directory.
@@ -349,6 +360,12 @@ export function compressArgs(options: CompressOptions): string[] {
   }
   if (options.decoder) {
     args.push("--decoder", options.decoder);
+  }
+  if (options.title !== undefined) {
+    args.push("--title", options.title);
+  }
+  if (options.bootJs) {
+    args.push("--boot-js", options.bootJs);
   }
   if (options.search) {
     args.push("--search");
