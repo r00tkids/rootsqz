@@ -16,7 +16,7 @@ pub fn agents_md(summary: &Value) -> String {
     s += "# rootsqz compression report\n\n";
     let _ = writeln!(
         s,
-        "This directory is a compression report written by rootsqz {} (`--report`, or `report: true` of the plugin). It tells what each byte of the compressed stream costs, to find what to change in the source to make the intro smaller. The next build with the report on overwrites it, so copy `report.json` before changing something, to compare after.\n",
+        "This directory is a compression report written by rootsqz {} (`--report`, or `report: true` or `ROOTSQZ_REPORT=1` of the plugin). It tells what each byte of the compressed stream costs, to find what to change in the source to make the intro smaller. The next build with the report on overwrites it, so copy `report.json` before changing something, to compare after.\n",
         summary["rootsqz_version"].as_str().unwrap_or("?")
     );
     s += "The agent skill `rootsqz-report` describes the whole workflow: how to make the report, read it, and what changes pay off. Install it into a project with `npx rootsqz install-skill`.\n\n";

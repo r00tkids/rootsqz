@@ -6,6 +6,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Added
+- The plugin writes the compression report when the environment variable `ROOTSQZ_REPORT` is set (e.g. `ROOTSQZ_REPORT=1 vite build`), without a change to the build config. `0` and `false` leave it off.
+
 ## [0.13.0] - 2026-10-21
 
 ### Changed

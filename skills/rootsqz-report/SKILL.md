@@ -15,7 +15,7 @@ Vite / Rollup plugin (`@r00tkids/rollup-plugin-rootsqz`): set `report: true` in 
 rootsqz({ sizeProfile: "64k", report: true })
 ```
 
-If you may not change the config permanently, change it for the build and restore it after, or read the option from an environment variable such as `report: process.env.ROOTSQZ_REPORT === "1"`.
+Without changing the config: set the environment variable `ROOTSQZ_REPORT=1` for the build, e.g. `ROOTSQZ_REPORT=1 npx vite build`. The plugin then writes the report as with `report: true`.
 
 Command line: add `--report` to the `rootsqz` command; the report is written to `report/` in the output directory (`-o`). Add `--report-source-map <bundle.js.map>` if the main JavaScript is a bundle with a source map.
 

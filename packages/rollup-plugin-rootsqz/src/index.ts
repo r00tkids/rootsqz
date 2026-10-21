@@ -105,6 +105,8 @@ export type RootsqzOptions = {
    * which `rootsqz report <dir>` queries.
    * The report names the imported files by their module and maps the bundle back to its
    * original sources. For that, the plugin turns on `sourcemap: "hidden"` if no source map is set.
+   * The environment variable `ROOTSQZ_REPORT` (any value except empty, `0` or `false`) also turns
+   * it on, e.g. `ROOTSQZ_REPORT=1 vite build`.
    */
   report?: boolean;
 
@@ -200,7 +202,8 @@ export type RootsqzOptions = {
  * @throws If `brotli` is combined with `config`, a report option or a `64k` size profile.
  */
 export default function (options: RootsqzOptions = {}): Plugin {
-  const wantsReport = Boolean(options.report || options.reportModels || options.reportDetail?.length ||
+  const envReport = !["", "0", "false"].includes(process.env.ROOTSQZ_REPORT ?? "");
+  const wantsReport = Boolean(options.report || envReport || options.reportModels || options.reportDetail?.length ||
     Object.keys(options.reportWasmDebug ?? {}).length);
   const wasmDebug = new Map(Object.entries(options.reportWasmDebug ?? {}).map(([file, debug]) => [path.resolve(file), path.resolve(debug)]));
   if (options.brotli && (options.config || wantsReport || options.sizeProfile !== undefined && options.sizeProfile !== "4k")) {

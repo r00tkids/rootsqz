@@ -21,8 +21,6 @@ export default defineConfig({
             // Set ROOTSQZ_BINARY_PATH to use another executable, e.g. ../../target/release/rootsqz
             sizeProfile: process.env.ROOTSQZ_SIZE_PROFILE,
             brotli: process.env.ROOTSQZ_BROTLI === "1",
-            // ROOTSQZ_REPORT=1 writes a compression report to dist/rootsqz-output/report
-            report: process.env.ROOTSQZ_REPORT === "1",
             fileTransforms: [
                 {
                     include: [/\.glsl$/, /\.frag$/, /\.vert$/],
