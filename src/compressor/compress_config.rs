@@ -143,19 +143,12 @@ impl Default for StaticModelParams {
     }
 }
 
-/// The models added when the stream has WebAssembly modules.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The models added when the stream has WebAssembly modules, none by default. The `64k-wasm`
+/// preset has them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WasmModelParams {
-    #[serde(default = "default_wasm_models")]
+    #[serde(default)]
     pub models: Vec<WasmContextConfig>,
-}
-
-impl Default for WasmModelParams {
-    fn default() -> Self {
-        Self {
-            models: default_wasm_models(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,24 +157,6 @@ pub struct WasmContextConfig {
     pub fields: u32,
     #[serde(default)]
     pub max_count: Option<u32>,
-}
-
-fn default_wasm_models() -> Vec<WasmContextConfig> {
-    [
-        (0, None),
-        (0x700, Some(30)),
-        (0x1000, Some(30)),
-        (0x300, Some(30)),
-        (0x2900, Some(30)),
-        (0x4100, None),
-        (0x4300, Some(30)),
-        (0x1300, Some(30)),
-        (0x0a, None),
-        (0x80, None),
-    ]
-    .into_iter()
-    .map(|(fields, max_count)| WasmContextConfig { fields, max_count })
-    .collect()
 }
 
 /// The models added when the stream has record ranges.
@@ -660,6 +635,20 @@ impl ModelConfig {
 #[cfg(test)]
 mod tests {
     use super::{CompressConfig, ModelConfig};
+    use crate::compressor::model_finder::{SIZE_64K_CONFIG_JSON, SIZE_64K_WASM_CONFIG_JSON};
+
+    #[test]
+    fn wasm_preset_is_the_64k_preset_with_wasm_models() {
+        let mut size_64k: CompressConfig = serde_json::from_str(SIZE_64K_CONFIG_JSON).unwrap();
+        let wasm: CompressConfig = serde_json::from_str(SIZE_64K_WASM_CONFIG_JSON).unwrap();
+        assert!(size_64k.static_model_params.wasm.models.is_empty());
+        assert!(!wasm.static_model_params.wasm.models.is_empty());
+        size_64k.static_model_params.wasm = wasm.static_model_params.wasm.clone();
+        assert_eq!(
+            serde_json::to_value(&size_64k).unwrap(),
+            serde_json::to_value(&wasm).unwrap()
+        );
+    }
 
     fn create(model: &str) -> anyhow::Result<()> {
         let json = format!(

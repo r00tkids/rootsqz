@@ -83,13 +83,14 @@ export type RootsqzOptions = {
 
   /**
    * Embedded compression preset (`--size-profile`). The executable defaults to `4k`;
-   * `64k` adds models for larger inputs, whose decoder needs up to about 1 GB of memory.
+   * `64k` adds models for larger inputs, whose decoder needs up to about 1 GB of memory, and
+   * `64k-wasm` also models WebAssembly files.
    */
-  sizeProfile?: "4k" | "64k";
+  sizeProfile?: "4k" | "64k" | "64k-wasm";
 
   /**
    * Pack the output as a Brotli stream decoded with `DecompressionStream('brotli')` (`--brotli`).
-   * Cannot be combined with `config`, `report` or the `64k` size profile.
+   * Cannot be combined with `config`, `report` or a `64k` size profile.
    */
   brotli?: boolean;
 
@@ -196,14 +197,14 @@ export type RootsqzOptions = {
  *
  * @param options Options of the plugin.
  * @returns The plugin, for the `plugins` array of the Rollup or Vite config.
- * @throws If `brotli` is combined with `config`, a report option or the `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option or a `64k` size profile.
  */
 export default function (options: RootsqzOptions = {}): Plugin {
   const wantsReport = Boolean(options.report || options.reportModels || options.reportDetail?.length ||
     Object.keys(options.reportWasmDebug ?? {}).length);
   const wasmDebug = new Map(Object.entries(options.reportWasmDebug ?? {}).map(([file, debug]) => [path.resolve(file), path.resolve(debug)]));
-  if (options.brotli && (options.config || wantsReport || options.sizeProfile === "64k")) {
-    throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
+  if (options.brotli && (options.config || wantsReport || (options.sizeProfile ?? "4k") !== "4k")) {
+    throw new Error('The "brotli" option cannot be combined with "config", "report" or a "64k" size profile.');
   }
 
   const isBuild = process.env.NODE_ENV === "production";

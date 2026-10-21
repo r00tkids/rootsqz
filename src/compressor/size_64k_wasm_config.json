@@ -1,0 +1,188 @@
+{
+    "static_model_params": {
+        "word_max_count": 2,
+        "count_offset": 0.1,
+        "context_input_scale": 1.75,
+        "hash_table_pow2_size": 24,
+        "wasm": {
+            "models": [
+                { "fields": 0 },
+                { "fields": 1792, "max_count": 30 },
+                { "fields": 4096, "max_count": 30 },
+                { "fields": 768, "max_count": 30 },
+                { "fields": 10496, "max_count": 30 },
+                { "fields": 16640 },
+                { "fields": 17152, "max_count": 30 },
+                { "fields": 4864, "max_count": 30 },
+                { "fields": 10 },
+                { "fields": 128 }
+            ]
+        }
+    },
+    "model": {
+        "type": "ContextMixer",
+        "selectors": [
+            "None",
+            "Order1",
+            "Known",
+            {
+                "Context": 21
+            },
+            {
+                "State": 13
+            }
+        ],
+        "learning_rate": 0.007,
+        "final_learning_rate": 0.002,
+        "init_weight": 0.02,
+        "lr_boost": 3,
+        "apms": [
+            {
+                "ctx": "Order0",
+                "limit": 127,
+                "weight": 0.1
+            },
+            {
+                "ctx": "Order1",
+                "limit": 127,
+                "weight": 0.1
+            },
+            {
+                "ctx": "Order2",
+                "bits": 10,
+                "limit": 127,
+                "weight": 0.1
+            },
+            {
+                "ctx": {
+                    "State": 12
+                },
+                "limit": 127,
+                "weight": 0.1
+            },
+            {
+                "ctx": {
+                    "State": 13
+                },
+                "limit": 127,
+                "weight": 0.1
+            },
+            {
+                "ctx": {
+                    "Context": 21
+                },
+                "bits": 10,
+                "limit": 127,
+                "weight": 0.1
+            }
+        ],
+        "models": [
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000000",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000001",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000011",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000111",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00001111",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b11111111",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00010101",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000010",
+                "max_count": 4
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00011110",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00111100",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00001011",
+                "max_count": 255
+            },
+            {
+                "type": "Word"
+            },
+            {
+                "type": "Match",
+                "min_len": 1
+            },
+            {
+                "type": "Match",
+                "min_len": 3
+            },
+            {
+                "type": "Match",
+                "min_len": 6,
+                "expected_byte_context": true
+            },
+            {
+                "type": "Match",
+                "min_len": 12
+            },
+            {
+                "type": "Match",
+                "min_len": 24
+            },
+            {
+                "type": "Match",
+                "min_len": 1,
+                "candidates": 4,
+                "expected_byte_context": true,
+                "second": true
+            },
+            {
+                "type": "JsContext",
+                "variant": 0,
+                "max_count": 255
+            },
+            {
+                "type": "JsContext",
+                "variant": 1,
+                "max_count": 255
+            },
+            {
+                "type": "JsContext",
+                "variant": 2,
+                "max_count": 255
+            },
+            {
+                "type": "JsContext",
+                "variant": 3,
+                "max_count": 255
+            }
+        ]
+    }
+}

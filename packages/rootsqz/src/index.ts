@@ -200,13 +200,14 @@ export type CompressOptions = RunOptions & {
 
   /**
    * Embedded compression preset (`--size-profile`). The executable defaults to `4k`;
-   * `64k` adds models for larger inputs, whose decoder needs up to about 1 GB of memory.
+   * `64k` adds models for larger inputs, whose decoder needs up to about 1 GB of memory, and
+   * `64k-wasm` also models WebAssembly files.
    */
-  sizeProfile?: "4k" | "64k";
+  sizeProfile?: "4k" | "64k" | "64k-wasm";
 
   /**
    * Pack the output as a Brotli stream decoded with `DecompressionStream('brotli')` (`--brotli`).
-   * Cannot be combined with `config`, `report` or the `64k` size profile.
+   * Cannot be combined with `config`, `report` or a `64k` size profile.
    */
   brotli?: boolean;
 
@@ -301,11 +302,11 @@ function wantsReport(options: CompressOptions): boolean {
 /**
  * Command line arguments of the executable for the given options.
  *
- * @throws If `brotli` is combined with `config`, a report option or the `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option or a `64k` size profile.
  */
 export function compressArgs(options: CompressOptions): string[] {
-  if (options.brotli && (options.config || wantsReport(options) || options.sizeProfile === "64k")) {
-    throw new Error('The "brotli" option cannot be combined with "config", "report" or the "64k" size profile.');
+  if (options.brotli && (options.config || wantsReport(options) || (options.sizeProfile ?? "4k") !== "4k")) {
+    throw new Error('The "brotli" option cannot be combined with "config", "report" or a "64k" size profile.');
   }
 
   const args: string[] = ["--js-main", options.jsMain];
@@ -384,7 +385,7 @@ export function compressArgs(options: CompressOptions): string[] {
  * Packs and compresses a JavaScript file and further files into the output directory.
  * Rejects if the executable cannot be started or exits with a code other than 0.
  *
- * @throws If `brotli` is combined with `config`, a report option or the `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option or a `64k` size profile.
  */
 export function compress(options: CompressOptions): Promise<void> {
   return run(compressArgs(options), options);

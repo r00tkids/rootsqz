@@ -66,15 +66,16 @@ rootsqz({
     rootsqzPath: undefined,
 
     /**
-     * Embedded compression preset, "4k" (default) or "64k".
-     * The 64k preset adds models for larger inputs, whose decoder needs up to about 1 GB of memory.
+     * Embedded compression preset, "4k" (default), "64k" or "64k-wasm".
+     * The 64k presets add models for larger inputs, whose decoder needs up to about 1 GB of memory,
+     * and "64k-wasm" also models WebAssembly files.
      */
     sizeProfile: "64k",
 
     /**
      * Pack the output as a Brotli stream that the browser decodes with
      * DecompressionStream('brotli') (Firefox 147+ / Safari 18.4+, not Chrome).
-     * Cannot be combined with `config`, `report` or the 64k size profile.
+     * Cannot be combined with `config`, `report` or a 64k size profile.
      */
     brotli: false,
 

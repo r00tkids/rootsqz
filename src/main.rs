@@ -73,7 +73,9 @@ mod node_tests {
     use crate::compressor::compress_config::{ModelConfig, StreamLayout};
     use crate::compressor::records::detect_records;
     use crate::compressor::mixer::{ApmConfig, ApmContext, Selector};
-    use crate::compressor::model_finder::{create_default_compress_config, SIZE_64K_CONFIG_JSON};
+    use crate::compressor::model_finder::{
+        create_default_compress_config, SIZE_64K_CONFIG_JSON, SIZE_64K_WASM_CONFIG_JSON,
+    };
     use crate::compressor::utils::prob_squash;
     use crate::compressor::Encoder;
     use crate::web::output_generator::{
@@ -242,6 +244,8 @@ mod node_tests {
         }
         let size_64k: crate::compressor::compress_config::CompressConfig =
             serde_json::from_str(SIZE_64K_CONFIG_JSON).unwrap();
+        let size_64k_wasm: crate::compressor::compress_config::CompressConfig =
+            serde_json::from_str(SIZE_64K_WASM_CONFIG_JSON).unwrap();
         let script_input = std::fs::read("tests/ray_tracer/index.js").unwrap();
         // The script followed by a WebAssembly module, for the WasmContext models
         let mut wasm_input = script_input.clone();
@@ -262,7 +266,7 @@ mod node_tests {
         for (name, config, input, layout) in [
             ("mixed", mixed, &script_input, StreamLayout::default()),
             ("64k", size_64k.clone(), &script_input, StreamLayout::default()),
-            ("64k_wasm", size_64k.clone(), &wasm_input, wasm_layout.clone()),
+            ("64k_wasm", size_64k_wasm, &wasm_input, wasm_layout.clone()),
             ("64k_records", size_64k, &records_input, records_layout.clone()),
             ("context_mixer_records", context_mixer, &records_input, records_layout),
         ] {
@@ -463,7 +467,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
             "-f",
             "tests/wasm/fixture.wasm",
             "--size-profile",
-            "64k",
+            "64k-wasm",
             "-t",
             "node",
             "-o",
@@ -482,9 +486,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
         input.extend_from_slice(&wasm);
         assert!(std::fs::read(output_dir.join("output.bin")).unwrap() == input);
 
-        // The module is after the JavaScript and the decoded runs in the stream. This module is too
-        // small for its models to pay for their decoder, so the output above packs it without them,
-        // and predictions_match_js_bit_for_bit checks the models.
+        // The module is after the JavaScript and the decoded runs in the stream
         let start = (runs.js.len() + runs.decoded.concat().len()) as u32;
         let demo = crate::web::read_demo(
             js_path.to_str().unwrap(),
@@ -509,13 +511,13 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
         let (js, wasm) = (js_path.to_str().unwrap(), "tests/wasm/fixture.wasm");
 
         let cli = crate::Cli::try_parse_from([
-            "rootsqz", "-j", js, "-f", wasm, "--size-profile", "64k", "-o",
+            "rootsqz", "-j", js, "-f", wasm, "--size-profile", "64k-wasm", "-o",
             output_dir.to_str().unwrap(),
         ])
         .unwrap();
         crate::web::run(cli.default_args.unwrap()).unwrap();
 
-        let config = serde_json::from_str(SIZE_64K_CONFIG_JSON).unwrap();
+        let config = serde_json::from_str(SIZE_64K_WASM_CONFIG_JSON).unwrap();
         let mut demo = crate::web::read_demo(js, &[wasm.to_owned()]).unwrap();
         demo.layout.stream = crate::web::choose_layout(&config, &demo).unwrap();
         demo.layout.encoded_len = crate::compressor::search::stream_size(&config, &demo).unwrap();

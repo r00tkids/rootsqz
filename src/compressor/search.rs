@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     compress_config::{CompressConfig, ModelConfig, RecordConfig, WasmContextConfig},
     mixer::{ApmConfig, ApmContext, Selector},
+    model_finder::SIZE_64K_WASM_CONFIG_JSON,
     Encoder,
 };
 use crate::web::output_generator::{web_overhead, WebLayout};
@@ -706,6 +707,11 @@ fn neighbours(config: &CompressConfig, wasm: bool, records: bool) -> Vec<Move> {
             push("remove all WasmContext".to_owned(), &|c| {
                 c.static_model_params.wasm.models.clear()
             });
+        } else {
+            push("add the WasmContext models of 64k-wasm".to_owned(), &|c| {
+                let preset: CompressConfig = serde_json::from_str(SIZE_64K_WASM_CONFIG_JSON).unwrap();
+                c.static_model_params.wasm = preset.static_model_params.wasm;
+            });
         }
         for (index, model) in wasm_models.iter().enumerate() {
             let label = format!("WasmContext {:#x}", model.fields);
@@ -1086,7 +1092,13 @@ mod tests {
         };
         let shifted: Vec<usize> = state_models(before).iter().map(|m| m - 1).collect();
         assert_eq!(state_models(apms), shifted);
-        assert!(labels(true).iter().any(|l| l == "remove all WasmContext"));
+        // The wasm models are only in the 64k-wasm preset, which the search can add
+        let with_wasm = labels(true);
+        assert!(with_wasm.contains(&"add the WasmContext models of 64k-wasm".to_owned()));
+        let wasm: CompressConfig = serde_json::from_str(SIZE_64K_WASM_CONFIG_JSON).unwrap();
+        assert!(neighbours(&wasm, true, false)
+            .iter()
+            .any(|m| m.label == "remove all WasmContext"));
     }
 
     #[test]

@@ -11,7 +11,7 @@ pub mod output_generator;
 use crate::{
     compressor::{
         compress_config::{CompressConfig, StreamLayout},
-        model_finder::{DEFAULT_CONFIG_JSON, SIZE_64K_CONFIG_JSON},
+        model_finder::{DEFAULT_CONFIG_JSON, SIZE_64K_CONFIG_JSON, SIZE_64K_WASM_CONFIG_JSON},
         records::{self, detect_records},
         Encoder,
     },
@@ -208,6 +208,20 @@ pub enum SizeProfile {
     FourK,
     #[value(name = "64k")]
     SixtyFourK,
+    /// The 64k preset with context models for WebAssembly files
+    #[value(name = "64k-wasm")]
+    SixtyFourKWasm,
+}
+
+impl SizeProfile {
+    /// The JSON of the embedded config
+    pub fn config_json(self) -> &'static str {
+        match self {
+            SizeProfile::FourK => DEFAULT_CONFIG_JSON,
+            SizeProfile::SixtyFourK => SIZE_64K_CONFIG_JSON,
+            SizeProfile::SixtyFourKWasm => SIZE_64K_WASM_CONFIG_JSON,
+        }
+    }
 }
 
 impl Args {
@@ -369,51 +383,32 @@ pub fn read_demo(js_main: &str, files: &[String]) -> Result<Demo> {
     })
 }
 
-/// The layout whose models `demo` is packed with: of the layout `read_demo` detected, with or
-/// without its WebAssembly modules, and with the record ranges that `choose_record_ranges`
-/// chooses, whichever makes the web output smallest.
+/// The layout whose models `demo` is packed with: the layout `read_demo` detected, with the
+/// record ranges that `choose_record_ranges` chooses. Its WebAssembly modules get the models of
+/// the config, if it has any.
 pub fn choose_layout(config: &CompressConfig, demo: &Demo) -> Result<StreamLayout> {
     let detected = &demo.layout.stream;
-    let mut wasm_options = vec![detected.wasm.clone()];
-    if !detected.wasm.is_empty() && !config.static_model_params.wasm.models.is_empty() {
-        wasm_options.push(Vec::new());
+    let mut layout = StreamLayout {
+        wasm: detected.wasm.clone(),
+        records: Vec::new(),
+    };
+    // Without record candidates there is nothing to choose, so no trial compression
+    if detected.records.is_empty() || config.static_model_params.records.models.is_empty() {
+        return Ok(layout);
     }
-    // Nothing to choose, so no trial compression
-    if wasm_options.len() == 1
-        && (detected.records.is_empty() || config.static_model_params.records.models.is_empty())
-    {
-        return Ok(StreamLayout {
-            wasm: detected.wasm.clone(),
-            records: Vec::new(),
-        });
-    }
-    let mut best: Option<(StreamLayout, f64)> = None;
-    for wasm in wasm_options {
-        if !wasm.is_empty() {
-            println!("Trying with the WebAssembly models:");
-        } else if !detected.wasm.is_empty() {
-            println!("Trying without the WebAssembly models:");
-        }
-        let layout = StreamLayout {
-            wasm,
-            records: detected.records.clone(),
-        };
-        let (records, size) = choose_record_ranges(config, demo, &layout)?;
-        if best.as_ref().map_or(true, |best| size < best.1) {
-            best = Some((StreamLayout { records, ..layout }, size));
-        }
-    }
-    Ok(best.unwrap().0)
+    layout.records = detected.records.clone();
+    layout.records = choose_record_ranges(config, demo, &layout)?;
+    Ok(layout)
 }
 
 /// The record ranges, out of the `layout.records` candidates, that the record models of the config
-/// get, and the size of the web output with them: the ranges where they save bits in a trial
-/// compression, or none if they don't make the output smaller.
+/// get: the ranges where they save bits in a trial compression, or none if they don't make the
+/// web output smaller.
 fn choose_record_ranges(
     config: &CompressConfig,
     demo: &Demo,
     layout: &StreamLayout,
-) -> Result<(Vec<[u32; 3]>, f64)> {
+) -> Result<Vec<[u32; 3]>> {
     let size = |layout: &StreamLayout| -> Result<(Vec<f64>, f64)> {
         let costs = records::byte_costs(config.create_model_for(layout)?, &demo.stream);
         let overhead = output_generator::web_overhead(
@@ -434,9 +429,6 @@ fn choose_record_ranges(
     let (without, without_size) = size(&without_layout)?;
     println!("  no record ranges: {without_size:.0} bytes");
     let mut best = (Vec::new(), without_size);
-    if layout.records.is_empty() || config.static_model_params.records.models.is_empty() {
-        return Ok(best);
-    }
     let mut candidates = layout.records.clone();
     for _ in 0..3 {
         let (with, with_size) = size(&StreamLayout {
@@ -453,7 +445,7 @@ fn choose_record_ranges(
         }
         candidates = selected;
     }
-    Ok(best)
+    Ok(best.0)
 }
 
 /// The config that `search` finds for the input of `args`, or the one kept in --search-cache.
@@ -533,7 +525,7 @@ pub fn run(args: Args) -> Result<()> {
             bail!("--brotli requires the web target");
         }
         if args.config.is_some() || args.size_profile != SizeProfile::FourK || args.wants_report() {
-            bail!("--brotli cannot be combined with --config, --size-profile 64k, or --report");
+            bail!("--brotli cannot be combined with --config, --size-profile 64k or 64k-wasm, or --report");
         }
         println!("Packing {} source bytes with Brotli", source_len);
         return output_generator::render_brotli_output(
@@ -550,11 +542,7 @@ pub fn run(args: Args) -> Result<()> {
     let config_json = match &args.config {
         Some(path) => std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config: {}", path.display()))?,
-        None => match args.size_profile {
-            SizeProfile::FourK => DEFAULT_CONFIG_JSON,
-            SizeProfile::SixtyFourK => SIZE_64K_CONFIG_JSON,
-        }
-        .to_owned(),
+        None => args.size_profile.config_json().to_owned(),
     };
     let mut model_config: CompressConfig =
         serde_json::from_str(&config_json).with_context(|| {
@@ -820,11 +808,7 @@ fn read_config(config: &Option<PathBuf>, size_profile: SizeProfile) -> Result<Co
     let json = match config {
         Some(path) => std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config: {}", path.display()))?,
-        None => match size_profile {
-            SizeProfile::FourK => DEFAULT_CONFIG_JSON,
-            SizeProfile::SixtyFourK => SIZE_64K_CONFIG_JSON,
-        }
-        .to_owned(),
+        None => size_profile.config_json().to_owned(),
     };
     serde_json::from_str(&json).context("Failed to parse config")
 }

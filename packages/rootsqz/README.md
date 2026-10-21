@@ -45,7 +45,7 @@ await compress({
     preCompressedFiles: ['image.jpg'],
 
     /**
-     * "4k" (default) or "64k"
+     * "4k" (default), "64k", or "64k-wasm" for 64k intros with WebAssembly files
      */
     sizeProfile: '64k',
 
