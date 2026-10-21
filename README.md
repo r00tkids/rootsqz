@@ -66,7 +66,7 @@ The presets are JSON files: [4k](src/compressor/default_config.json), [64k](src/
 ### Config search
 `--search` tries small changes to the settings, one at a time, and keeps each one that makes the output smaller, decoder included. Models that cost more decoder code than they save are dropped. It takes about an hour for a 64k intro. The result is saved as `search_config.json`; pass it with `--config` to build again without searching, or set `--search-cache <DIR>` to reuse it automatically.
 
-To search without building, or to find one config for several intros, use `rootsqz search`. See [docs/config.md](docs/config.md#search).
+To search without building, or to find one config for several intros, use `rootsqz search`. It saves the best config so far after each improvement, so you can stop it at any time and build with what it found; `--search` during a build only saves its result at the end. See [docs/config.md](docs/config.md#search).
 
 ## Compression report
 `--report` writes a report to `report/` in the output directory. Open `report.html` to see your input colored by how many bits each byte costs, with suggestions for what to change. `rootsqz report <dir>` prints the details, such as the most expensive parts or the cost of each wasm function. See [docs/report.md](docs/report.md).
