@@ -64,9 +64,11 @@ Your files are available at runtime as `rsqz.files["name"]`, see [Runtime API](#
 The presets are JSON files: [4k](src/compressor/default_config.json), [64k](src/compressor/size_64k_config.json) and [64k-wasm](src/compressor/size_64k_wasm_config.json). To change one, copy it, edit it, and pass it with `--config`. The decoder is generated from the config, so it only contains the models you use. [docs/config.md](docs/config.md) describes the models and settings, but usually it's easier to let `--search` do this.
 
 ### Config search
-`--search` tries small changes to the settings, one at a time, and keeps each one that makes the output smaller, decoder included. Models that cost more decoder code than they save are dropped. It takes about an hour for a 64k intro. The result is saved as `search_config.json`; pass it with `--config` to build again without searching, or set `--search-cache <DIR>` to reuse it automatically.
+`--search` tries small changes to the settings, one at a time, and keeps each one that makes the output smaller, decoder included. Models that cost more decoder code than they save are dropped. It takes about an hour for a 64k intro.
 
-To search without building, or to find one config for several intros, use `rootsqz search`. It saves the best config so far after each improvement, so you can stop it at any time and build with what it found; `--search` during a build only saves its result at the end. See [docs/config.md](docs/config.md#search).
+The best config so far is saved as `search_config.json` in the output directory after each improvement. You can stop the search at any time and build with it using `--config`. Run the same command again to continue a stopped search where it was. With `--search-cache <DIR>`, the result is kept there and reused when you build the same input again.
+
+To search without building, or to find one config for several intros, use `rootsqz search`. See [docs/config.md](docs/config.md#search).
 
 ## Compression report
 `--report` writes a report to `report/` in the output directory. Open `report.html` to see your input colored by how many bits each byte costs, with suggestions for what to change. `rootsqz report <dir>` prints the details, such as the most expensive parts or the cost of each wasm function. See [docs/report.md](docs/report.md).
@@ -164,7 +166,7 @@ Notes:
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
 - To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader). To keep the page responsive while it decodes, set `decoder: "worker"`, see [Decoder](#decoder).
-- `search: true` searches for the model config that packs the bundle smallest before packing, see [Config search](#config-search). It takes about an hour for a 64k intro, so set `searchCache` to a directory that keeps the config found for the next build of the same bundle.
+- `search: true` searches for the model config that packs the bundle smallest before packing, see [Config search](#config-search). It takes about an hour for a 64k intro, so set `searchCache` to a directory that keeps the config found for the next build of the same bundle. It also keeps the progress there, so a stopped build continues the search; Vite empties `dist`, so without `searchCache` a stopped search starts over.
 - With `report: true`, the plugin writes a [compression report](#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set. For an imported `x.wasm`, it gives the report `x.debug.wasm` (the unstripped file) or `x.wasm.map` next to it as debug info, or the file that `reportWasmDebug: { 'src/x.wasm': 'build/x.full.wasm' }` names, so the report names its functions and maps them to source lines. Run `npx rootsqz install-skill` once to teach coding agents to use it ([For coding agents](#for-coding-agents)).
 
 See the [plugin README](packages/rollup-plugin-rootsqz) for all options and [examples/vite](examples/vite) for a working project with `vite-plugin-glsl`.

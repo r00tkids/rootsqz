@@ -44,7 +44,9 @@ It skips changes after which the decoder would need more than 1 GB of memory, by
 
 With wasm files, it also tries the WebAssembly models of the `64k-wasm` preset if the config has none.
 
-`--search` during a build saves its result only when it's done, so stopping it loses the progress. `rootsqz search` searches without building, and can be stopped and resumed:
+`--search` saves the best config so far as `search_config.json` in the output directory after each improvement, and the state of the search next to it (or in the `--search-cache` directory). Run the same command again to resume a stopped search.
+
+`rootsqz search` searches without building the intro:
 
 ```sh
 rootsqz search -i main.js,data.bin -o config.json

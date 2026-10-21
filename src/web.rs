@@ -121,7 +121,9 @@ pub struct Args {
 
     /// Search for the model config that packs the input smallest, starting from --config or the
     /// --size-profile preset, before packing. Takes minutes to hours; the decoder is generated
-    /// from the config found, which is written to search_config.json in the output directory
+    /// from the config found. The best config so far is written to search_config.json in the
+    /// output directory after each improvement, and running the same command again resumes a
+    /// stopped search
     #[arg(long)]
     pub search: bool,
 
@@ -477,6 +479,20 @@ fn search_config(args: &Args, start: CompressConfig, start_json: &str) -> Result
         return serde_json::from_str(&std::fs::read_to_string(file)?)
             .with_context(|| format!("Failed to parse {}", file.display()));
     }
+    // The best config so far and the state of the search, kept while it runs, so that a stopped
+    // search resumes where it was
+    let output_directory = Path::new(&args.output_directory);
+    let progress_dir = args.search_cache.as_deref().unwrap_or(output_directory);
+    std::fs::create_dir_all(progress_dir)?;
+    std::fs::create_dir_all(output_directory)?;
+    let progress_file = progress_dir.join(format!("{hash:016x}.progress.json"));
+    let state_file = progress_dir.join(format!("{hash:016x}.state"));
+    let mut start = start;
+    if progress_file.exists() && state_file.exists() {
+        println!("Resuming the search that stopped before: {}", progress_file.display());
+        start = serde_json::from_str(&std::fs::read_to_string(&progress_file)?)
+            .with_context(|| format!("Failed to parse {}", progress_file.display()))?;
+    }
     let threads = args
         .search_threads
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
@@ -488,15 +504,21 @@ fn search_config(args: &Args, start: CompressConfig, start_json: &str) -> Result
         batch: 12,
         max_evals: usize::MAX,
         max_memory: MAX_DECODER_MEMORY,
-        state: None,
+        state: Some(state_file.clone()),
     };
-    let (config, _) = search(start, std::slice::from_ref(&demo), &options, |line, _| {
+    let (config, _) = search(start, std::slice::from_ref(&demo), &options, |line, config| {
         println!("[{:>6.0}s] {line}", started.elapsed().as_secs_f64());
+        // The best config so far, to build with if the search is stopped
+        if let Ok(json) = serde_json::to_string_pretty(config) {
+            let _ = std::fs::write(&progress_file, json.clone() + "\n");
+            let _ = std::fs::write(output_directory.join("search_config.json"), json + "\n");
+        }
     })?;
     if let Some(file) = cache_file {
-        std::fs::create_dir_all(file.parent().unwrap())?;
         std::fs::write(&file, serde_json::to_string_pretty(&config)? + "\n")?;
     }
+    let _ = std::fs::remove_file(&progress_file);
+    let _ = std::fs::remove_file(&state_file);
     Ok(config)
 }
 
