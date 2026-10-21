@@ -6,6 +6,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-22
+
 ### Added
 - `--title <TEXT>` sets the page title of the web output before it decompresses, and `--boot-js <FILE>` runs a script first, before the loader and decompression. The Node API and the plugin have them as `title` and `bootJs`. Outputs without them are unchanged.
 - The plugin writes the compression report when the environment variable `ROOTSQZ_REPORT` is set (e.g. `ROOTSQZ_REPORT=1 vite build`), without a change to the build config. `0` and `false` leave it off.
@@ -174,6 +176,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.14.0]: https://github.com/r00tkids/rootsqz/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/r00tkids/rootsqz/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/r00tkids/rootsqz/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/r00tkids/rootsqz/compare/v0.10.0...v0.11.0
