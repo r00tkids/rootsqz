@@ -86,5 +86,6 @@ Changes that often pay off:
 - Number literals with many digits cost bits for each digit. Use fewer digits where the precision does not show.
 - A string that occurred before is cheap, but its first occurrence is not. Write similar code the same way, e.g. the same names and the same order of arguments and fields.
 - A packed file that costs more than 8 bits per byte is already compressed: pack it as it is (`&pre-compressed` with the plugin, `--pre-compressed-file` on the command line).
+- `sizeProfile: "64k-semi-fast"` and `"64k-fast"` trade size for decoding speed: `"64k"` packs about 2% and 6% smaller. Suggest it only if the user can accept the slower decode.
 - WebAssembly: for a large module, try `sizeProfile: "64k-wasm"` (`--size-profile 64k-wasm`), which models wasm; a small one packs smaller without. Strip custom sections of tools (`name`, `producers`, `.debug_*`) but keep those the intro reads with `WebAssembly.Module.customSections`. Optimize with `wasm-opt -Oz`, which also writes LEB128 numbers without padding. Look at expensive functions with `wasm-instructions`; constants (`F32Const`, `I32Const`) and large data segments are often the place to start.
 - With `reportModels`, `models` and the `--models` columns show which submodels help, to tune a custom model config.

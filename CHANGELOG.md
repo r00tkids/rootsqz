@@ -6,6 +6,14 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Added
+- `--size-profile 64k-semi-fast` and `64k-fast` (`sizeProfile` in the Node API and the plugin), 64k presets that mix fewer models, so they decode faster and with less memory, but pack larger. On three 64k intros, decoder included, with decode times in Chrome:
+  - `64k`: 130.9 KB, 8–13 s, up to 1 GB of memory (25 models, 7 weight sets, 5 APMs)
+  - `64k-semi-fast`: 133.9 KB (+2.3%), 5–7 s, 0.6–0.7 GB (15 models, 5 weight sets, 2 APMs)
+  - `64k-fast`: 138.3 KB (+5.7%), 3–6 s, 0.5–0.6 GB (11 models, 3 weight sets, 2 APMs)
+
+  Both still pack each of the three smaller than mashi 0.1.7 (143.6 KB in total).
+
 ## [0.14.0] - 2026-10-22
 
 ### Added

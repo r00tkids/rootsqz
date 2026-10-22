@@ -83,10 +83,11 @@ export type RootsqzOptions = {
 
   /**
    * Embedded compression preset (`--size-profile`). The executable defaults to `64k`, whose
-   * decoder needs up to about 1 GB of memory; `4k` is for small intros, and `64k-wasm` also
-   * models WebAssembly files.
+   * decoder needs up to about 1 GB of memory; `4k` is for small intros, `64k-wasm` also
+   * models WebAssembly files. `64k-semi-fast` decodes about 1.7 times as fast as `64k` and packs
+   * about 2% larger, `64k-fast` about twice as fast and about 6% larger.
    */
-  sizeProfile?: "4k" | "64k" | "64k-wasm";
+  sizeProfile?: "4k" | "64k" | "64k-wasm" | "64k-semi-fast" | "64k-fast";
 
   /**
    * Pack the output as a Brotli stream decoded with `DecompressionStream('brotli')` (`--brotli`).

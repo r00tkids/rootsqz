@@ -2,7 +2,7 @@
 
 rootsqz compresses with a set of models, each predicting the next bit in its own way, and a mixer that combines their predictions. A config says which models to use and how they are set up. The decoder is generated from the config, so it only contains the code of the models you use.
 
-The presets are configs too: [4k](../src/compressor/default_config.json), [64k](../src/compressor/size_64k_config.json) and [64k-wasm](../src/compressor/size_64k_wasm_config.json). To make your own, copy one, edit it and pass it with `--config`. Or let [the search](#search) do it for you.
+The presets are configs too: [4k](../src/compressor/default_config.json), [64k](../src/compressor/size_64k_config.json), [64k-wasm](../src/compressor/size_64k_wasm_config.json), [64k-semi-fast](../src/compressor/size_64k_semi_fast_config.json) and [64k-fast](../src/compressor/size_64k_fast_config.json). To make your own, copy one, edit it and pass it with `--config`. Or let [the search](#search) do it for you.
 
 ## Models
 `model` is the mixer, and `model.models` lists the models it mixes:

@@ -635,7 +635,10 @@ impl ModelConfig {
 #[cfg(test)]
 mod tests {
     use super::{CompressConfig, ModelConfig};
-    use crate::compressor::model_finder::{SIZE_64K_CONFIG_JSON, SIZE_64K_WASM_CONFIG_JSON};
+    use crate::compressor::model_finder::{
+        SIZE_64K_CONFIG_JSON, SIZE_64K_FAST_CONFIG_JSON, SIZE_64K_SEMI_FAST_CONFIG_JSON,
+        SIZE_64K_WASM_CONFIG_JSON,
+    };
 
     #[test]
     fn wasm_preset_is_the_64k_preset_with_wasm_models() {
@@ -648,6 +651,20 @@ mod tests {
             serde_json::to_value(&size_64k).unwrap(),
             serde_json::to_value(&wasm).unwrap()
         );
+    }
+
+    #[test]
+    fn fast_presets_mix_fewer_models_than_the_64k_preset() {
+        let model_count = |json| {
+            let config: CompressConfig = serde_json::from_str(json).unwrap();
+            config.create_model().unwrap();
+            let ModelConfig::ContextMixer { models, .. } = &config.model else { panic!() };
+            models.len()
+        };
+        let size_64k = model_count(SIZE_64K_CONFIG_JSON);
+        let semi_fast = model_count(SIZE_64K_SEMI_FAST_CONFIG_JSON);
+        assert!(model_count(SIZE_64K_FAST_CONFIG_JSON) < semi_fast);
+        assert!(semi_fast < size_64k);
     }
 
     fn create(model: &str) -> anyhow::Result<()> {

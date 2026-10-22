@@ -67,9 +67,10 @@ rootsqz({
     rootsqzPath: undefined,
 
     /**
-     * Embedded compression preset: "64k" (default), "4k" for small intros, or "64k-wasm",
-     * which also models WebAssembly files. The decoder of the 64k presets needs up to about
-     * 1 GB of memory.
+     * Embedded compression preset: "64k" (default), "4k" for small intros, "64k-wasm",
+     * which also models WebAssembly files, "64k-semi-fast" or "64k-fast", which decode about
+     * 1.7 and 2 times as fast as "64k" but pack about 2% and 6% larger. The decoder of "64k"
+     * and "64k-wasm" needs up to about 1 GB of memory, that of the fast ones 0.6-0.7 GB.
      */
     sizeProfile: "64k",
 

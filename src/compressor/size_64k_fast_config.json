@@ -1,0 +1,189 @@
+{
+    "static_model_params": {
+        "hash_table_pow2_size": 24,
+        "word_max_count": 2,
+        "token_max_count": 4,
+        "token_context_bytes": 1,
+        "token_max_position": 15,
+        "count_offset": 0.1,
+        "context_input_scale": 1.75,
+        "mixer": {
+            "learning_rate": 0.0004,
+            "context_learning_rate": 0.022,
+            "context_weight_scale": 0.3
+        },
+        "records": {
+            "models": [
+                {
+                    "dists": [
+                        -1
+                    ],
+                    "column": true,
+                    "delta": 0,
+                    "max_count": 120
+                },
+                {
+                    "dists": [
+                        -1,
+                        -2,
+                        -3,
+                        -4
+                    ],
+                    "column": false,
+                    "delta": 0,
+                    "max_count": 120
+                },
+                {
+                    "dists": [
+                        1
+                    ],
+                    "column": true,
+                    "delta": 0,
+                    "max_count": 120
+                },
+                {
+                    "dists": [
+                        8
+                    ],
+                    "column": true,
+                    "delta": 0,
+                    "max_count": 120
+                },
+                {
+                    "dists": [
+                        4
+                    ],
+                    "column": false,
+                    "delta": 0,
+                    "max_count": 120
+                },
+                {
+                    "dists": [
+                        7,
+                        8
+                    ],
+                    "column": false,
+                    "delta": 0,
+                    "max_count": 120
+                },
+                {
+                    "dists": [
+                        4
+                    ],
+                    "column": true,
+                    "delta": 0,
+                    "max_count": 120
+                },
+                {
+                    "dists": [],
+                    "column": false,
+                    "delta": 2,
+                    "max_count": 10
+                },
+                {
+                    "dists": [],
+                    "column": false,
+                    "delta": 4,
+                    "max_count": 10
+                },
+                {
+                    "dists": [],
+                    "column": false,
+                    "delta": -2,
+                    "max_count": 10
+                },
+                {
+                    "dists": [],
+                    "column": false,
+                    "delta": -4,
+                    "max_count": 10
+                }
+            ]
+        }
+    },
+    "model": {
+        "type": "ContextMixer",
+        "models": [
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000000",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000001",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000011",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00000111",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b00001111",
+                "max_count": 255
+            },
+            {
+                "type": "NOrderByte",
+                "byte_mask": "0b11110001",
+                "max_count": 255
+            },
+            {
+                "type": "Word"
+            },
+            {
+                "type": "Match",
+                "min_len": 2,
+                "candidates": 32,
+                "expected_byte_context": true,
+                "second": false
+            },
+            {
+                "type": "Match",
+                "min_len": 6,
+                "candidates": 1,
+                "expected_byte_context": false,
+                "second": false
+            },
+            {
+                "type": "JsContext",
+                "variant": 0,
+                "max_count": 255
+            },
+            {
+                "type": "CharClass",
+                "order": 3,
+                "max_count": 30
+            }
+        ],
+        "selectors": [
+            "None",
+            "Order1",
+            "Known"
+        ],
+        "learning_rate": 0.0056,
+        "final_learning_rate": 0.0012,
+        "init_weight": 0.02,
+        "lr_boost": 3.0,
+        "apms": [
+            {
+                "ctx": "Order1",
+                "bits": 12,
+                "limit": 127,
+                "weight": 0.1
+            },
+            {
+                "ctx": "Order2",
+                "bits": 10,
+                "limit": 127,
+                "weight": 0.1
+            }
+        ]
+    }
+}

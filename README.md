@@ -50,7 +50,7 @@ The main options:
 - `-f, --file <FILE>`: a file to pack with it. Repeat it for more files, and put similar files next to each other.
 - `-p, --pre-compressed-file <FILE>`: a file that is already compressed, like a JPEG, stored as it is.
 - `-o, --output-directory <DIR>`: where `index.html` goes.
-- `--size-profile <64k|4k|64k-wasm>`: the preset. `64k` is the default; its decoder needs up to about 1 GB of memory. `4k` has a smaller decoder for small intros. `64k-wasm` is `64k` plus models for WebAssembly; use it when your intro has a large wasm file.
+- `--size-profile <64k|4k|64k-wasm|64k-semi-fast|64k-fast>`: the preset. `64k` is the default; its decoder needs up to about 1 GB of memory. `4k` has a smaller decoder for small intros. `64k-wasm` is `64k` plus models for WebAssembly; use it when your intro has a large wasm file. `64k-semi-fast` and `64k-fast` mix fewer models, so they decode faster and with less memory, but pack larger: on 64k intros that take 8–13 s to decode with `64k`, `64k-semi-fast` takes 5–7 s and packs about 2% larger, and `64k-fast` takes 3–6 s and packs about 6% larger.
 - `--search`: find the settings that pack your intro smallest. See [Config search](#config-search).
 - `--loader` and `--decoder`: show something while the intro unpacks. See [Loader](#loader) and [Decoder](#decoder).
 - `--title <TEXT>` and `--boot-js <FILE>`: set the page title, or run a script before the intro unpacks. See [Title and boot script](#title-and-boot-script).
@@ -62,7 +62,7 @@ The main options:
 Your files are available at runtime as `rsqz.files["name"]`, see [Runtime API](#runtime-api).
 
 ### Your own settings
-The presets are JSON files: [4k](src/compressor/default_config.json), [64k](src/compressor/size_64k_config.json) and [64k-wasm](src/compressor/size_64k_wasm_config.json). To change one, copy it, edit it, and pass it with `--config`. The decoder is generated from the config, so it only contains the models you use. [docs/config.md](docs/config.md) describes the models and settings, but usually it's easier to let `--search` do this.
+The presets are JSON files: [4k](src/compressor/default_config.json), [64k](src/compressor/size_64k_config.json), [64k-wasm](src/compressor/size_64k_wasm_config.json), [64k-semi-fast](src/compressor/size_64k_semi_fast_config.json) and [64k-fast](src/compressor/size_64k_fast_config.json). To change one, copy it, edit it, and pass it with `--config`. The decoder is generated from the config, so it only contains the models you use. [docs/config.md](docs/config.md) describes the models and settings, but usually it's easier to let `--search` do this.
 
 ### Config search
 `--search` tries small changes to the settings, one at a time, and keeps each one that makes the output smaller, decoder included. Models that cost more decoder code than they save are dropped. It takes about an hour for a 64k intro.

@@ -11,7 +11,10 @@ pub mod output_generator;
 use crate::{
     compressor::{
         compress_config::{CompressConfig, StreamLayout},
-        model_finder::{DEFAULT_CONFIG_JSON, SIZE_64K_CONFIG_JSON, SIZE_64K_WASM_CONFIG_JSON},
+        model_finder::{
+            DEFAULT_CONFIG_JSON, SIZE_64K_CONFIG_JSON, SIZE_64K_FAST_CONFIG_JSON,
+            SIZE_64K_SEMI_FAST_CONFIG_JSON, SIZE_64K_WASM_CONFIG_JSON,
+        },
         records::{self, detect_records},
         Encoder,
     },
@@ -241,6 +244,12 @@ pub enum SizeProfile {
     /// The 64k preset with context models for WebAssembly files
     #[value(name = "64k-wasm")]
     SixtyFourKWasm,
+    /// The 64k preset with fewer models, whose decoder runs about 1.7 times as fast
+    #[value(name = "64k-semi-fast")]
+    SixtyFourKSemiFast,
+    /// The 64k preset with even fewer models, whose decoder runs about twice as fast
+    #[value(name = "64k-fast")]
+    SixtyFourKFast,
 }
 
 impl SizeProfile {
@@ -250,6 +259,8 @@ impl SizeProfile {
             SizeProfile::FourK => DEFAULT_CONFIG_JSON,
             SizeProfile::SixtyFourK => SIZE_64K_CONFIG_JSON,
             SizeProfile::SixtyFourKWasm => SIZE_64K_WASM_CONFIG_JSON,
+            SizeProfile::SixtyFourKSemiFast => SIZE_64K_SEMI_FAST_CONFIG_JSON,
+            SizeProfile::SixtyFourKFast => SIZE_64K_FAST_CONFIG_JSON,
         }
     }
 }
@@ -577,7 +588,7 @@ pub fn run(args: Args) -> Result<()> {
         }
         let profile_64k = matches!(args.size_profile, Some(profile) if profile != SizeProfile::FourK);
         if args.config.is_some() || profile_64k || args.wants_report() {
-            bail!("--brotli cannot be combined with --config, --size-profile 64k or 64k-wasm, or --report");
+            bail!("--brotli cannot be combined with --config, a 64k --size-profile, or --report");
         }
         println!("Packing {} source bytes with Brotli", source_len);
         return output_generator::render_brotli_output(
