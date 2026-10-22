@@ -6,6 +6,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-22
+
 ### Added
 - `--size-profile 64k-semi-fast` and `64k-fast` (`sizeProfile` in the Node API and the plugin), 64k presets that mix fewer models, so they decode faster and with less memory, but pack larger. On three 64k intros, decoder included, with decode times in Chrome:
   - `64k`: 130.9 KB, 8–13 s, up to 1 GB of memory (25 models, 7 weight sets, 5 APMs)
@@ -184,6 +186,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.15.0]: https://github.com/r00tkids/rootsqz/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/r00tkids/rootsqz/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/r00tkids/rootsqz/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/r00tkids/rootsqz/compare/v0.11.0...v0.12.0
