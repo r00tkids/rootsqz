@@ -53,7 +53,7 @@ The main options:
 - `--size-profile <64k|4k|64k-wasm|64k-semi-fast|64k-fast>`: the preset. `64k` is the default; its decoder needs up to about 1 GB of memory. `4k` has a smaller decoder for small intros. `64k-wasm` is `64k` plus models for WebAssembly; use it when your intro has a large wasm file. `64k-semi-fast` and `64k-fast` mix fewer models, so they decode faster and with less memory, but pack larger: on 64k intros that take 8–13 s to decode with `64k`, `64k-semi-fast` takes 5–7 s and packs about 2% larger, and `64k-fast` takes 3–6 s and packs about 6% larger.
 - `--search`: find the settings that pack your intro smallest. See [Config search](#config-search).
 - `--loader` and `--decoder`: show something while the intro unpacks. See [Loader](#loader) and [Decoder](#decoder).
-- `--wasm-decoder`: decode with WebAssembly, several times as fast, for some more bytes. See [WebAssembly decoder](#webassembly-decoder).
+- `--wasm-decoder`: decode with WebAssembly, 5–6 times as fast, for about 1 KB more. See [WebAssembly decoder](#webassembly-decoder).
 - `--title <TEXT>` and `--boot-js <FILE>`: set the page title, or run a script before the intro unpacks. See [Title and boot script](#title-and-boot-script).
 - `-r, --report`: write a report of where the bytes go. See [Compression report](#compression-report).
 - `--brotli`: use Brotli, which the browser unpacks itself. Smaller decoder, worse compression, and only Firefox 147+ and Safari 18.4+ support it (not Chrome, as of September 2026).
@@ -120,9 +120,14 @@ How it works: by default, the decoder blocks the main thread, and the browser pa
 `--decoder` is only for the `web` target without `--brotli`.
 
 ### WebAssembly decoder
-`--wasm-decoder` decodes with WebAssembly instead of JavaScript, with any `--decoder`. Like the JavaScript decoder, it is generated from the config, so it only contains the models you use, with their settings as constants. It decodes several times as fast, but the module and its glue take more bytes than the JavaScript decoder they replace: the module is part of the decoder, so it is only deflated.
+`--wasm-decoder` decodes with WebAssembly instead of JavaScript, with any `--decoder`. Like the JavaScript decoder, it is generated from the config, so it only contains the models you use, with their settings as constants, and it decodes the same stream. The module and its glue take more bytes than the JavaScript decoder they replace, as the module is part of the decoder and only deflated. On a 64k intro of 225 KB, in Chrome, with `--decoder worker`:
 
-It works with the `web` and `node` targets, not with `--brotli`. All current browsers run it; it needs about as much memory as the JavaScript decoder.
+| Preset | Size, JavaScript decoder | Size, WebAssembly decoder | Decoding, JavaScript | Decoding, WebAssembly |
+|---|---|---|---|---|
+| `64k` | 55,162 bytes | 56,497 bytes (+1,335) | 16.6 s | 2.9 s |
+| `64k-fast` | 57,373 bytes | 58,291 bytes (+918) | 8.4 s | 1.4 s |
+
+So `64k` with the WebAssembly decoder packs smaller than `64k-fast` with the JavaScript one and decodes about three times as fast. The decoder uses 128-bit SIMD, which all current browsers support. It works with the `web` and `node` targets, not with `--brotli`, and needs about as much memory as the JavaScript decoder.
 
 ## Title and boot script
 - `--title <TEXT>`: The title of the page, set before the intro unpacks. It adds about 15 bytes plus the text.
@@ -178,7 +183,7 @@ Notes:
   document.body.insertAdjacentHTML("beforeend", "<canvas id=c>");
   ```
 - Leave `build.sourcemap` off or set it to `'hidden'`. With `true`, the comment that refers to the source map is packed into the output.
-- To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader). To keep the page responsive while it decodes, set `decoder: "worker"`, see [Decoder](#decoder). To decode several times as fast, for some more bytes, set `wasmDecoder: true`, see [WebAssembly decoder](#webassembly-decoder).
+- To show a loader while the output decompresses, set `loader: { preset: "spinner" }`, `{ preset: "bar" }` or `{ preset: "progress" }`, or your own `{ html, js }` files. See [Loader](#loader). To keep the page responsive while it decodes, set `decoder: "worker"`, see [Decoder](#decoder). To decode 5–6 times as fast, for about 1 KB more, set `wasmDecoder: true`, see [WebAssembly decoder](#webassembly-decoder).
 - `title: "My intro"` sets the page title before the output decompresses, and `bootJs: "boot.js"` runs a script first, see [Title and boot script](#title-and-boot-script).
 - `search: true` searches for the model config that packs the bundle smallest before packing, see [Config search](#config-search). It takes about an hour for a 64k intro, so set `searchCache` to a directory that keeps the config found for the next build of the same bundle. It also keeps the progress there, so a stopped build continues the search; Vite empties `dist`, so without `searchCache` a stopped search starts over.
 - With `report: true`, or with the environment variable `ROOTSQZ_REPORT=1` (e.g. `ROOTSQZ_REPORT=1 vite build`), the plugin writes a [compression report](#compression-report) to `rootsqz-output/report`. It names the imported files by their module and maps the bundle back to its original sources, for which it turns on `build.sourcemap: 'hidden'` if no source map is set. For an imported `x.wasm`, it gives the report `x.debug.wasm` (the unstripped file) or `x.wasm.map` next to it as debug info, or the file that `reportWasmDebug: { 'src/x.wasm': 'build/x.full.wasm' }` names, so the report names its functions and maps them to source lines. Run `npx rootsqz install-skill` once to teach coding agents to use it ([For coding agents](#for-coding-agents)).

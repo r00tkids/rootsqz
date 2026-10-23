@@ -7,7 +7,11 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 ## [Unreleased]
 
 ### Added
-- `--wasm-decoder` (`wasmDecoder` in the Node API and the plugin) decodes with a WebAssembly decoder instead of the JavaScript one, with any `--decoder`, for the `web` and `node` targets. It is generated from the config like the JavaScript decoder and decodes several times as fast, for some more bytes. Outputs without it are unchanged.
+- `--wasm-decoder` (`wasmDecoder` in the Node API and the plugin) decodes with a WebAssembly decoder instead of the JavaScript one, with any `--decoder`, for the `web` and `node` targets. It is generated from the config like the JavaScript decoder, decodes the same stream 5–6 times as fast, and takes about 1 KB more. On a 64k intro of 225 KB in Chrome, with `--decoder worker`, decoder included:
+  - `64k`: 55,162 → 56,497 bytes (+1,335), 16.6 s → 2.9 s
+  - `64k-fast`: 57,373 → 58,291 bytes (+918), 8.4 s → 1.4 s
+
+  Outputs without it are unchanged.
 
 ## [0.15.0] - 2026-10-22
 

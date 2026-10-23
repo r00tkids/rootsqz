@@ -145,7 +145,7 @@ export type RootsqzOptions = {
 
   /**
    * Decode with a WebAssembly decoder generated for the model config (`--wasm-decoder`), with any
-   * `decoder`. It decodes several times as fast as the JavaScript decoder, but takes more bytes.
+   * `decoder`. It decodes 5–6 times as fast as the JavaScript decoder, for about 1 KB more.
    */
   wasmDecoder?: boolean;
 

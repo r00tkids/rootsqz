@@ -124,8 +124,8 @@ pub struct Args {
     #[arg(long, value_enum, value_name = "DECODER")]
     pub decoder: Option<Decoder>,
 
-    /// Decode with a WebAssembly decoder generated for the model config, which decodes several
-    /// times as fast as the JavaScript one but takes more bytes. Works with every --decoder
+    /// Decode with a WebAssembly decoder generated for the model config, which decodes 5-6 times as
+    /// fast as the JavaScript one, for about 1 KB more. Works with every --decoder
     #[arg(long)]
     pub wasm_decoder: bool,
 
