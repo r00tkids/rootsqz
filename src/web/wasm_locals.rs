@@ -1,5 +1,5 @@
 //! The last step of the generated WebAssembly decoder: its locals coalesced, like binaryen's
-//! coalesce-locals and reorder-locals. Two locals of a type share an index when one is never
+//! coalesce-locals and reorder-locals, and its integer f64 constants shorter. Two locals of a type share an index when one is never
 //! written while the other holds a value that is read later, and the most used indices come
 //! first. Fewer and smaller local indices make the code more alike from function to function,
 //! which deflate likes. V8 allocates registers itself, so the speed stays the same.
@@ -19,6 +19,18 @@ fn leb(out: &mut Vec<u8>, mut value: u32) {
     }
 }
 
+fn sleb(out: &mut Vec<u8>, mut value: i32) {
+    loop {
+        let byte = (value & 127) as u8;
+        value >>= 7;
+        if (value == 0 && byte & 64 == 0) || (value == -1 && byte & 64 != 0) {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 128);
+    }
+}
+
 fn section(out: &mut Vec<u8>, id: u8, contents: &[u8]) {
     out.push(id);
     leb(out, contents.len() as u32);
@@ -26,7 +38,7 @@ fn section(out: &mut Vec<u8>, id: u8, contents: &[u8]) {
 }
 
 /// The module without its custom sections (unless `keep_custom`), with the locals of each
-/// function coalesced
+/// function coalesced and its integer f64 constants shorter
 pub fn finish(bytes: &[u8], keep_custom: bool) -> Result<Vec<u8>> {
     let mut out = bytes[..8].to_vec();
     // The parameters of each type, and the type of each function
@@ -91,6 +103,7 @@ enum Op {
     BrTable(Vec<u32>),
     /// return or unreachable
     Exit,
+    F64(f64),
     Other,
 }
 
@@ -105,7 +118,7 @@ fn type_byte(ty: ValType) -> Result<u8> {
     })
 }
 
-/// The body with its locals coalesced
+/// The body with its locals coalesced and its integer f64 constants shorter
 fn coalesce(bytes: &[u8], body: &FunctionBody, params: &[ValType]) -> Result<Vec<u8>> {
     let mut types = params.to_vec();
     for local in body.get_locals_reader()? {
@@ -139,6 +152,7 @@ fn coalesce(bytes: &[u8], body: &FunctionBody, params: &[ValType]) -> Result<Vec
                 Op::BrTable(depths)
             }
             Operator::Return | Operator::Unreachable => Op::Exit,
+            Operator::F64Const { value } => Op::F64(f64::from_bits(value.bits())),
             Operator::Try { .. } | Operator::TryTable { .. } | Operator::Delegate { .. } => {
                 bail!("Unexpected exception handling in the decoder")
             }
@@ -315,6 +329,13 @@ fn coalesce(bytes: &[u8], body: &FunctionBody, params: &[ValType]) -> Result<Vec
             Op::Get(i) | Op::Set(i) | Op::Tee(i) => {
                 out.push(bytes[start]);
                 leb(&mut out, new_index[slot_of[i as usize]]);
+            }
+            // An integer constant as an i32 constant, converted, in 3 bytes or so instead of 9. V8
+            // folds the conversion. (As an f32 constant, promoted, deflate likes less.)
+            Op::F64(v) if ((v as i32) as f64).to_bits() == v.to_bits() => {
+                out.push(0x41);
+                sleb(&mut out, v as i32);
+                out.push(0xb7);
             }
             _ => out.extend_from_slice(&bytes[start..end]),
         }
