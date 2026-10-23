@@ -275,7 +275,7 @@ export type CompressOptions = RunOptions & {
 
   /**
    * Keep the browser from showing the packed bytes of the web output as text, and from parsing
-   * them as HTML, while the page loads (`--hide-data`). Adds 10 bytes. By default on with the 64k
+   * them as HTML, while the page loads (`--hide-data`). Adds 19 bytes. By default on with the 64k
    * size profiles, and off with `4k` and `brotli`.
    */
   hideData?: boolean;

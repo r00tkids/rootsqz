@@ -391,12 +391,10 @@ mod tests {
     use crate::compressor::compress_config::MixerModelParams;
 
     #[test]
-    fn hide_markup_avoids_its_end_tag() {
-        assert_eq!(hide_markup(b"\x00<p>abc</noemb"), "<noembed>");
-        assert_eq!(hide_markup(b"\x00</NoEmbed\x01"), "<plaintext hidden>");
-        let header = html_header(100, Some("<noembed>")).unwrap();
-        assert!(header.ends_with("\"/><noembed>"), "{header}");
-        assert!(html_header(100, None).unwrap().ends_with("\">"));
+    fn html_header_hides_the_data() {
+        let header = html_header(100, true).unwrap();
+        assert!(header.ends_with("\"/><plaintext hidden>"), "{header}");
+        assert!(html_header(100, false).unwrap().ends_with("\">"));
     }
 
     #[test]
@@ -560,7 +558,6 @@ pub fn render_brotli_output(
             .write_all(&source)
             .context("Failed to compress demo with Brotli")?;
     }
-    let hide = hide_data.then(|| hide_markup(&compressed));
     let template = include_str!("templates/web/brotli.html");
     let render = |offset: usize| -> Result<String> {
         Ok(Handlebars::new().render_template(
@@ -569,7 +566,7 @@ pub fn render_brotli_output(
                 "offset": offset,
                 "end": offset + compressed.len(),
                 "boot_js": boot_js,
-                "hide": hide,
+                "hide": hide_data,
                 "js_len": main_js.len(),
                 "files_map": format!("{{{}}}", files_map.join(",")),
             }),
@@ -712,10 +709,9 @@ pub fn render_output(
                 wasm_bytes.as_deref(),
             )?;
 
-            let hide = hide_data.then(|| hide_markup(&[deflated_code.as_slice(), &compressed_data].concat()));
             let html_header_str = match &wasm_bytes {
-                Some(bytes) => html_header_wasm(deflated_code.len(), bytes.len(), hide)?,
-                None => html_header(deflated_code.len(), hide)?,
+                Some(bytes) => html_header_wasm(deflated_code.len(), bytes.len(), hide_data)?,
+                None => html_header(deflated_code.len(), hide_data)?,
             };
             let html_header_bytes = html_header_str.as_bytes();
 
@@ -974,9 +970,8 @@ pub fn web_overhead(
         wasm_bytes.as_deref(),
     )?;
     let header = match &wasm_bytes {
-        // The data is not known here, so it counts the usual markup
-        Some(bytes) => html_header_wasm(deflated_code.len(), bytes.len(), layout.hide_data.then_some("<noembed>"))?,
-        None => html_header(deflated_code.len(), layout.hide_data.then_some("<noembed>"))?,
+        Some(bytes) => html_header_wasm(deflated_code.len(), bytes.len(), layout.hide_data)?,
+        None => html_header(deflated_code.len(), layout.hide_data)?,
     };
     Ok(header.len() + deflated_code.len())
 }
@@ -1088,20 +1083,10 @@ fn js_string_literal(bytes: &[u8]) -> String {
     literal
 }
 
-/// Markup that makes the browser read the bytes after it, `data`, as hidden text, instead of
-/// showing them and parsing them into elements while the page loads: `<noembed>`, which is never
-/// shown and ends only at `</noembed`, or `<plaintext hidden>`, which never ends, if `data` has that
-fn hide_markup(data: &[u8]) -> &'static str {
-    if data.windows(9).any(|w| w.eq_ignore_ascii_case(b"</noembed")) {
-        "<plaintext hidden>"
-    } else {
-        "<noembed>"
-    }
-}
-
-/// The HTML that inflates and runs the boot code of `deflated_len` bytes, ending in `hide`
-/// (see `hide_markup`)
-fn html_header(deflated_len: usize, hide: Option<&str>) -> Result<String> {
+/// The HTML that inflates and runs the boot code of `deflated_len` bytes. With `hide`, it ends in
+/// `<plaintext hidden>`: the browser reads the bytes after it as hidden text, instead of showing
+/// them and parsing them into elements while the page loads.
+fn html_header(deflated_len: usize, hide: bool) -> Result<String> {
     let render = |start: usize| {
         Handlebars::new().render_template(
             include_str!("templates/web/index.html"),
@@ -1126,7 +1111,7 @@ fn html_header(deflated_len: usize, hide: Option<&str>) -> Result<String> {
 /// The HTML that inflates and runs the boot code of the WebAssembly decoder: the deflated bytes,
 /// `deflated_len` of them, are the module of `wasm_len` bytes and then the boot code, which it runs
 /// with the module bytes as M
-fn html_header_wasm(deflated_len: usize, wasm_len: usize, hide: Option<&str>) -> Result<String> {
+fn html_header_wasm(deflated_len: usize, wasm_len: usize, hide: bool) -> Result<String> {
     let render = |start: usize| {
         Handlebars::new().render_template(
             include_str!("templates/web/index_wasm.html"),

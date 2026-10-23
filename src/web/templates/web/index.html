@@ -1,1 +1,1 @@
-<svg onload="fetch`#`.then(t=>t.blob()).then(t=>(o={{{decompressor_end}}},p=t,new Response(t.slice({{{decompressor_start}}},o).stream().pipeThrough(new DecompressionStream(`deflate-raw`)))).text()).then(eval)"{{#if hide}}/>{{{hide}}}{{else}}>{{/if}}
+<svg onload="fetch`#`.then(t=>t.blob()).then(t=>(o={{{decompressor_end}}},p=t,new Response(t.slice({{{decompressor_start}}},o).stream().pipeThrough(new DecompressionStream(`deflate-raw`)))).text()).then(eval)"{{#if hide}}/><plaintext hidden>{{else}}>{{/if}}

@@ -137,7 +137,7 @@ So `64k` with the WebAssembly decoder packs smaller than `64k-fast` with the Jav
 Both are for the `web` target, also with `--brotli`.
 
 ## Hidden data
-The packed bytes follow the HTML that unpacks them, so while the page loads, the browser shows them as text, and parses them into elements, until the boot code clears the page. `--hide-data` puts them in a `<noembed>` element, whose content the browser neither shows nor parses (`<plaintext hidden>` in the rare case that the bytes contain `</noembed`). It adds 10 bytes, and is on by default with the 64k size profiles; `--hide-data=false` turns it off. With `--size-profile 4k` and `--brotli`, it is off by default. It is for the `web` target.
+The packed bytes follow the HTML that unpacks them, so while the page loads, the browser shows them as text, and parses them into elements, until the boot code clears the page. `--hide-data` puts them in a `<plaintext hidden>` element, whose content the browser neither shows nor parses: `plaintext` has no end tag, so everything after it is text. It adds 19 bytes (17 with `--brotli`), and is on by default with the 64k size profiles; `--hide-data=false` turns it off. With `--size-profile 4k` and `--brotli`, it is off by default. It is for the `web` target.
 
 ## Vite / Rollup plugin
 [`@r00tkids/rollup-plugin-rootsqz`](packages/rollup-plugin-rootsqz) runs rootsqz on the bundle, so a Vite or Rollup project builds straight to one compressed HTML file.

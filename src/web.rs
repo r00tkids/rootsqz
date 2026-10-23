@@ -131,7 +131,7 @@ pub struct Args {
     pub wasm_decoder: bool,
 
     /// Keep the browser from showing the packed bytes of the web output as text, and from parsing
-    /// them as HTML, while the page loads. Adds 10 bytes. By default on with the 64k size profiles,
+    /// them as HTML, while the page loads. Adds 19 bytes. By default on with the 64k size profiles,
     /// off with 4k and --brotli
     #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
     pub hide_data: Option<bool>,

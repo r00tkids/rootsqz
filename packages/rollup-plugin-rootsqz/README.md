@@ -134,7 +134,7 @@ rootsqz({
 
     /**
      * Hide the packed bytes while the page loads, instead of the browser showing them as text.
-     * Adds 10 bytes. By default on with the 64k size profiles, off with 4k and brotli.
+     * Adds 19 bytes. By default on with the 64k size profiles, off with 4k and brotli.
      */
     hideData: true,
 
