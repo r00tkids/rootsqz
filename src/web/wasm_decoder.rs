@@ -101,12 +101,30 @@ enum Leaf {
     },
 }
 
-/// Allocates the static memory
+/// Allocates the static memory: the small parts below SMALL_END, as far as they fit, so that
+/// their addresses take two bytes in the code, and the rest after them
 struct Memory {
+    small: u64,
     end: u64,
 }
 
+/// The end of the small parts, the first address whose signed LEB128 takes three bytes
+const SMALL_END: u64 = 8192;
+
 impl Memory {
+    fn alloc_small(&mut self, size: u64) -> u32 {
+        self.alloc_small_aligned(size, 16)
+    }
+
+    fn alloc_small_aligned(&mut self, size: u64, align: u64) -> u32 {
+        let at = (self.small + align - 1) & !(align - 1);
+        if at + size > SMALL_END {
+            return self.alloc(size);
+        }
+        self.small = at + size;
+        at as u32
+    }
+
     fn alloc(&mut self, size: u64) -> u32 {
         // 16-byte aligned, for SIMD loads
         let at = (self.end + 15) & !15;
@@ -322,7 +340,7 @@ pub(crate) fn generate_text(
         layout,
         options,
         decoded_len,
-        mem: Memory { end: 16 },
+        mem: Memory { small: 16, end: SMALL_END },
         leaves: Vec::new(),
         kinds: Vec::new(),
         data: Vec::new(),
@@ -383,7 +401,7 @@ impl<'a> Gen<'a> {
                 max_count,
             } => {
                 ensure!(*context_bytes <= 3, "IndirectByte context_bytes above 3");
-                let table = self.mem.alloc(2 << (8 * context_bytes));
+                let table = self.mem.alloc_small(2 << (8 * context_bytes));
                 self.context(
                     Kind::IndirectByte,
                     *max_count,
@@ -443,7 +461,8 @@ impl<'a> Gen<'a> {
             ensure!((-128..128).contains(&d), "Record dists must be -128 to 127 for the WebAssembly decoder");
             params.push(d as i8 as u8);
         }
-        let at = self.mem.alloc(params.len() as u64);
+        // Bytes, so no alignment
+        let at = self.mem.alloc_small_aligned(params.len() as u64, 1);
         self.data.push((at, params));
         let max_count = config.max_count.unwrap_or(15);
         ensure_count(max_count);
@@ -460,8 +479,9 @@ impl<'a> Gen<'a> {
     fn module(mut self, mix: &Mix, encoded_len: u32) -> Result<ModuleText> {
         let context = matches!(mix, Mix::Context { .. });
         let decoded_len = self.decoded_len;
-        let input = self.mem.alloc(encoded_len as u64 + 8);
+        // The decoded bytes first after the small parts, as many instructions address them
         let output = self.mem.alloc(decoded_len as u64 + 8);
+        let input = self.mem.alloc(encoded_len as u64 + 8);
 
         // The mixer inputs: 5 for each context model, 2 (1 with a plain Mixer) for each match model,
         // 1 for each match predictor, and the bias of the ContextMixer
@@ -476,12 +496,12 @@ impl<'a> Gen<'a> {
             .sum::<u32>()
             + context as u32;
         // One more, as SIMD takes the inputs in pairs
-        let inputs = self.mem.alloc(8 * n_inputs as u64 + 8);
+        let inputs = self.mem.alloc_small(8 * n_inputs as u64 + 8);
         // The state of each model for the selectors and APMs
-        let states = self.mem.alloc(4 * self.leaves.len() as u64);
+        let states = self.mem.alloc_small(4 * self.leaves.len() as u64);
 
         let n_cm = self.leaves.iter().filter(|l| matches!(l, Leaf::Context(..))).count() as u32;
-        let cm0 = self.mem.alloc((CM_SIZE * n_cm) as u64);
+        let cm0 = self.mem.alloc_small((CM_SIZE * n_cm) as u64);
         let cm_states = self.mem.alloc((n_cm as u64) << 18);
         let n_match = self.leaves.iter().filter(|l| matches!(l, Leaf::Match { .. })).count() as u32;
         let n_mp = self.leaves.iter().filter(|l| matches!(l, Leaf::MatchPredictor { .. })).count() as u32;
@@ -494,7 +514,7 @@ impl<'a> Gen<'a> {
         let has = |k: Kind| self.kinds.contains(&k);
         let char_table = has(Kind::Word) || has(Kind::CharClass) || has(Kind::TokenPosition) || has(Kind::JsContext);
         let char_classes = if char_table {
-            let at = self.mem.alloc(256);
+            let at = self.mem.alloc_small(256);
             self.data.push((at, char_class_table()));
             at
         } else {
@@ -519,17 +539,17 @@ impl<'a> Gen<'a> {
         // (from wasm.js) and the module ranges
         let wasm_parser = if has(Kind::WasmContext) {
             ensure!(!self.layout.wasm.is_empty(), "WasmContext is only used with WebAssembly modules");
-            let stack = self.mem.alloc(64 * 8);
-            let column = self.mem.alloc(64 * 32);
-            let last = self.mem.alloc(64 * 4);
-            let last2 = self.mem.alloc(64 * 4);
-            let values = self.mem.alloc(14 * 4);
-            let imm = self.mem.alloc(256);
+            let stack = self.mem.alloc_small(64 * 8);
+            let column = self.mem.alloc_small(64 * 32);
+            let last = self.mem.alloc_small(64 * 4);
+            let last2 = self.mem.alloc_small(64 * 4);
+            let values = self.mem.alloc_small(14 * 4);
+            let imm = self.mem.alloc_small(256);
             let js = include_str!("js_source/wasm.js");
             let table = js.split("let imm = \"").nth(1).and_then(|rest| rest.split('"').next()).context("The immediates in wasm.js")?;
             self.data.push((imm, table.bytes().map(|c| c - 48).collect()));
             let ranges: Vec<u8> = self.layout.wasm.iter().flat_map(|&(start, end)| [start.to_le_bytes(), end.to_le_bytes()]).flatten().collect();
-            let at = self.mem.alloc(ranges.len() as u64);
+            let at = self.mem.alloc_small(ranges.len() as u64);
             let end = at + ranges.len() as u32;
             self.data.push((at, ranges));
             [stack, column, last, last2, values, imm, at, end]
@@ -538,17 +558,23 @@ impl<'a> Gen<'a> {
         };
 
         // Record ranges, as gap, length and stride
+        let mut record_u16 = false;
         let records = if has(Kind::Record) {
             let mut end = 0;
-            let mut bytes = Vec::new();
+            let mut values = Vec::new();
             for &[start, range_end, stride] in &self.layout.records {
                 assert!(start % BLOCK == 0 && range_end % BLOCK == 0);
                 let gap = start - std::mem::replace(&mut end, range_end);
-                for v in [gap / BLOCK, (range_end - start) / BLOCK, stride] {
-                    bytes.extend_from_slice(&v.to_le_bytes());
-                }
+                values.extend([gap / BLOCK, (range_end - start) / BLOCK, stride]);
             }
-            let at = self.mem.alloc(bytes.len() as u64);
+            // 16 bits each if they fit, else 32
+            record_u16 = values.iter().all(|&v| v < 1 << 16);
+            let bytes: Vec<u8> = if record_u16 {
+                values.iter().flat_map(|&v| (v as u16).to_le_bytes()).collect()
+            } else {
+                values.iter().flat_map(|&v| v.to_le_bytes()).collect()
+            };
+            let at = self.mem.alloc_small(bytes.len() as u64);
             let len = bytes.len() as u32;
             self.data.push((at, bytes));
             (at, len)
@@ -558,13 +584,13 @@ impl<'a> Gen<'a> {
 
         // Match models: a record of fields each, and their tables
         const MM_SIZE: u32 = 64;
-        let mm0 = self.mem.alloc((MM_SIZE * n_match) as u64);
+        let mm0 = self.mem.alloc_small((MM_SIZE * n_match) as u64);
         // Their tables, which $mm_new takes in turn: the head, the chain, the probabilities and the
         // counts
         let mm_chain = (4 * (decoded_len + 2) + 15) & !15;
         let mm_region = self.mem.alloc(n_match as u64 * ((4 << 22) + mm_chain as u64 + 4 * (72 << 16)));
         const MP_SIZE: u32 = 48;
-        let mp0 = self.mem.alloc((MP_SIZE * n_mp) as u64);
+        let mp0 = self.mem.alloc_small((MP_SIZE * n_mp) as u64);
         let mut mp_tables = Vec::new();
         for leaf in &self.leaves {
             if let Leaf::MatchPredictor { table_bits, .. } = leaf {
@@ -665,11 +691,11 @@ impl<'a> Gen<'a> {
                             }
                         }
                     };
-                    set_tables.push(self.mem.alloc(4 * contexts));
+                    set_tables.push(self.mem.alloc_small(4 * contexts));
                 }
             }
             Mix::Plain => {
-                let weights = self.mem.alloc(8 * n_inputs as u64);
+                let weights = self.mem.alloc_small(8 * n_inputs as u64);
                 let present = self.mem.alloc(1 << 16);
                 let context_weights = self.mem.alloc((8 * n_inputs as u64) << 16);
                 plain = (weights, present, context_weights);
@@ -722,6 +748,10 @@ impl<'a> Gen<'a> {
                 .replace("{MAP}", &map.to_string())
                 .replace("{MAPSHIFT}", &(32 - map_bits).to_string())
                 .replace("{MAPMASK}", &((1u32 << map_bits) - 1).to_string())
+                .replace("{RLOAD}", if record_u16 { "i32.load16_u" } else { "i32.load" })
+                .replace("{R1}", if record_u16 { "2" } else { "4" })
+                .replace("{R2}", if record_u16 { "4" } else { "8" })
+                .replace("{R3}", if record_u16 { "6" } else { "12" })
                 .replace("{RECORDS}", &records.0.to_string())
                 .replace("{RECORDS_END}", &(records.0 + records.1).to_string())
                 .replace("{MM0}", &mm0.to_string())
@@ -922,8 +952,20 @@ impl<'a> Gen<'a> {
         } else {
             ""
         };
-        let data: String = self
-            .data
+        // Data segments with few bytes between them as one, as each takes a header
+        let mut segments: Vec<(u32, Vec<u8>)> = Vec::new();
+        let mut parts = self.data.clone();
+        parts.sort_by_key(|&(at, _)| at);
+        for (at, bytes) in parts {
+            match segments.last_mut() {
+                Some((start, merged)) if at - (*start + merged.len() as u32) <= 8 => {
+                    merged.resize((at - *start) as usize, 0);
+                    merged.extend(bytes);
+                }
+                _ => segments.push((at, bytes)),
+            }
+        }
+        let data: String = segments
             .iter()
             .map(|(at, bytes)| {
                 let escaped: String = bytes.iter().map(|b| format!("\\{b:02x}")).collect();
@@ -1889,10 +1931,10 @@ const NEXT_RECORD: &str = r#"
   (block $found (loop $range
     (br_if $found (i32.lt_u (local.get $pos) (i32.load offset=80 (local.get $r))))
     (br_if $found (i32.eq (local.tee $d (i32.load offset=72 (local.get $r))) (i32.const {RECORDS_END})))
-    (i32.store offset=76 (local.get $r) (local.tee $n (i32.add (i32.load offset=80 (local.get $r)) (i32.shl (i32.load (local.get $d)) (i32.const 9)))))
-    (i32.store offset=80 (local.get $r) (i32.add (local.get $n) (i32.shl (i32.load offset=4 (local.get $d)) (i32.const 9))))
-    (i32.store offset=84 (local.get $r) (i32.load offset=8 (local.get $d)))
-    (i32.store offset=72 (local.get $r) (i32.add (local.get $d) (i32.const 12)))
+    (i32.store offset=76 (local.get $r) (local.tee $n (i32.add (i32.load offset=80 (local.get $r)) (i32.shl ({RLOAD} (local.get $d)) (i32.const 9)))))
+    (i32.store offset=80 (local.get $r) (i32.add (local.get $n) (i32.shl ({RLOAD} offset={R1} (local.get $d)) (i32.const 9))))
+    (i32.store offset=84 (local.get $r) ({RLOAD} offset={R2} (local.get $d)))
+    (i32.store offset=72 (local.get $r) (i32.add (local.get $d) (i32.const {R3})))
     (br $range)))
   (local.set $start (i32.load offset=76 (local.get $r)))
   (local.set $stride (i32.load offset=84 (local.get $r)))
