@@ -1063,6 +1063,12 @@ decompressSliced(input, output => {
                     vec![],
                 )
                 .unwrap_or_else(|e| panic!("{decoder:?}, loader {with_loader}: {e:?}"));
+                // The header runs the boot code with an indirect eval, in the global scope: a
+                // direct eval in the onload handler would see the properties of document as
+                // variables, so that URL would be document.URL
+                let html = std::fs::read(format!("testout/wasm_web_decoders/{decoder:?}_{with_loader}/index.html")).unwrap();
+                let header = String::from_utf8_lossy(&html[..html.windows(2).position(|w| w == b"\">").unwrap()]).into_owned();
+                assert!(header.contains("eval?.(") && !header.contains("eval("), "{header}");
             }
         }
     }
