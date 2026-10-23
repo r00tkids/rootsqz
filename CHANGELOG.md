@@ -6,6 +6,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-23
+
 ### Added
 - `--hide-data` (`hideData` in the Node API and the plugin) keeps the browser from showing the packed bytes of the web output as text, and from parsing them as HTML, while the page loads. It adds 19 bytes.
 
@@ -201,6 +203,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.17.0]: https://github.com/r00tkids/rootsqz/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/r00tkids/rootsqz/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/r00tkids/rootsqz/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/r00tkids/rootsqz/compare/v0.13.0...v0.14.0

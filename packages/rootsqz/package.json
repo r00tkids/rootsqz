@@ -1,6 +1,6 @@
 {
   "name": "@r00tkids/rootsqz",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "type": "module",
   "description": "Compresses and packs JavaScript and assets into one HTML file, for demoscene intros and size restricted challenges.",
   "bin": {
