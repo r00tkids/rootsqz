@@ -515,7 +515,7 @@ impl<'a> Gen<'a> {
         // Their tables, which $mm_new takes in turn: the head, the chain, the probabilities and the
         // counts
         let mm_chain = (4 * (decoded_len + 2) + 15) & !15;
-        let mm_region = self.mem.alloc(n_match as u64 * ((4 << 22) + mm_chain as u64 + 5 * (72 << 16)));
+        let mm_region = self.mem.alloc(n_match as u64 * ((4 << 22) + mm_chain as u64 + 4 * (72 << 16)));
         const MP_SIZE: u32 = 48;
         let mp0 = self.mem.alloc((MP_SIZE * n_mp) as u64);
         let mut mp_tables = Vec::new();
@@ -562,6 +562,7 @@ impl<'a> Gen<'a> {
         // APM tables
         let mut apm_tables = Vec::new();
         let mut apm_probs = (0, 0);
+        let mut apm_counts = 0;
         if let Mix::Context { apms, .. } = mix {
             let mut sizes = Vec::new();
             for apm in apms.iter() {
@@ -576,12 +577,14 @@ impl<'a> Gen<'a> {
                 };
                 sizes.push(17 * contexts);
             }
-            // The probabilities of all, one after the other, as they start the same
+            // The probabilities of all, one after the other, as they start the same, then their
+            // counts in the same order, so that the count of the probability at a is at a / 2 + K
             let total: u64 = sizes.iter().sum();
             let mut probs = self.mem.alloc(8 * total);
             apm_probs = (probs, 8 * total);
+            apm_counts = self.mem.alloc(4 * total) - probs / 2;
             for &len in &sizes {
-                apm_tables.push((probs, self.mem.alloc(4 * len), len));
+                apm_tables.push(probs);
                 probs += 8 * len as u32;
             }
         }
@@ -635,13 +638,15 @@ impl<'a> Gen<'a> {
         let pages = heap >> 16;
 
         let scale = self.params.context_input_scale;
+        // The inputs of a context model times -1 for a Record that expects a 0: negating a factor is exact
+        let sign = |v: f64| format!("(f64.mul {} (local.get $sg))", f64c(v));
         let consts = [
             ("U24F", f64c(U24_MAX as f64)),
-            ("IN0", f64c(0.5 * scale)),
-            ("IN1", f64c(3. * scale)),
-            ("IN2", f64c(0.4 * scale)),
-            ("IN3", f64c(0.25 * scale)),
-            ("IN4", f64c(1. * scale)),
+            ("IN0", sign(0.5 * scale)),
+            ("IN1", sign(3. * scale)),
+            ("IN2", sign(0.4 * scale)),
+            ("IN3", sign(0.25 * scale)),
+            ("IN4", sign(1. * scale)),
             ("OFFSET", f64c(self.params.count_offset)),
             ("EPS", f64c(1. / U24_MAX as f64)),
             ("EPS1", f64c(1. - 1. / U24_MAX as f64)),
@@ -650,6 +655,7 @@ impl<'a> Gen<'a> {
         let fill = |s: &str| -> String {
             let simd = self.options.simd;
             let mut s = s.replace("{STRETCHES}", if simd { STRETCHES_SIMD } else { STRETCHES })
+                .replace("{ZERO_INPUTS}", if simd { ZERO_INPUTS_SIMD } else { ZERO_INPUTS })
                 .replace("{CM_STATE}", if context { CM_STATE } else { "" }).replace("{MM_INPUT}", if context { MM_INPUT } else { "" });
             for (name, value) in &consts {
                 s = s.replace(&format!("{{{name}}}"), value);
@@ -752,7 +758,26 @@ impl<'a> Gen<'a> {
             }
         }
         if n_match > 0 {
-            funcs += &fill(MATCH);
+            // Only the code for the flags that the match models have
+            let flags = |bit: u32| {
+                let mut all = self.leaves.iter().filter_map(|leaf| match leaf {
+                    Leaf::Match { flags, .. } => Some(flags & bit != 0),
+                    _ => None,
+                });
+                let first = all.next().unwrap();
+                if all.all(|f| f == first) { Some(first) } else { None }
+            };
+            let pick = match flags(2) {
+                Some(true) => MM_SECOND.to_string(),
+                Some(false) => MM_LONGEST.to_string(),
+                None => format!("(if (i32.and (i32.load offset=8 (local.get $r)) (i32.const 2)) (then {MM_SECOND}) (else {MM_LONGEST}))"),
+            };
+            let expected = match flags(1) {
+                Some(true) => "(local.get $e)",
+                Some(false) => "(i32.const 0)",
+                None => "(select (local.get $e) (i32.const 0) (i32.and (i32.load offset=8 (local.get $r)) (i32.const 1)))",
+            };
+            funcs += &fill(&MATCH.replace("{MM_PICK}", &pick).replace("{MM_EXPECTED}", expected));
         }
         if n_mp > 0 {
             funcs += &fill(MATCH_PREDICTOR);
@@ -811,6 +836,7 @@ impl<'a> Gen<'a> {
                     *lr_boost,
                     apms,
                     &apm_tables,
+                    apm_counts,
                     &set_tables,
                     inputs,
                     n_inputs,
@@ -927,7 +953,8 @@ impl<'a> Gen<'a> {
         init_weight: f64,
         lr_boost: f64,
         apms: &[ApmConfig],
-        apm_tables: &[(u32, u32, u64)],
+        apm_tables: &[u32],
+        apm_counts: u32,
         set_tables: &[u32],
         inputs: u32,
         n_inputs: u32,
@@ -1061,7 +1088,7 @@ impl<'a> Gen<'a> {
                         32 - apm.bits
                     ),
                 };
-                let (probs, _, _) = apm_tables[j];
+                let probs = apm_tables[j];
                 // The address of the first bucket: probs + ((ctx << 8 | bitCtx) * 17 + bucket) * 8
                 write!(
                     p,
@@ -1071,19 +1098,31 @@ impl<'a> Gen<'a> {
                 )?;
             }
             p += "(call $stretch (local.get $st)))\n";
-            f += r#"(func $apm (param $a i32) (result f64)
+            f += &r#"(func $apm (param $a i32) (result f64)
   (f64.add (f64.mul (f64.load (local.get $a)) (f64.sub (f64.const 1) (global.get $af))) (f64.mul (f64.load offset=8 (local.get $a)) (global.get $af))))
-(func $apm_l (param $a i32) (param $n i32) (param $w f64) (param $bit f64) (param $limit i32) (local $c i32) (local $v f64)
-  (i32.store (local.get $n) (local.tee $c (select (local.tee $c (i32.add (i32.load (local.get $n)) (i32.const 1))) (local.get $limit) (i32.lt_u (local.get $c) (local.get $limit)))))
+(func $apm_l (param $a i32) (param $w f64) (param $bit f64) (param $limit i32) (local $n i32) (local $c i32) (local $v f64)
+  ;; The count of the probability at a is at a / 2 + K
+  (i32.store offset=K (local.tee $n (i32.shr_u (local.get $a) (i32.const 1))) (local.tee $c (select (local.tee $c (i32.add (i32.load offset=K (local.get $n)) (i32.const 1))) (local.get $limit) (i32.lt_u (local.get $c) (local.get $limit)))))
   (f64.store (local.get $a) (f64.add (local.tee $v (f64.load (local.get $a))) (f64.div (f64.mul (f64.sub (local.get $bit) (local.get $v)) (local.get $w)) (f64.add (f64.convert_i32_u (local.get $c)) (f64.const 0.5))))))
 (func $q (param f64) (result f64) (call $squash (local.get 0)))
-"#;
-            for (j, apm) in apms.iter().enumerate() {
-                let _ = (apm, apm_tables[j]);
+"#.replace("offset=K", &format!("offset={apm_counts}"));
+            // A limit that all APMs share is a constant
+            if apms.iter().all(|apm| apm.limit == apms[0].limit) {
+                f = f.replace(" (param $limit i32)", "").replace("(local.get $limit)", &format!("(i32.const {})", apms[0].limit));
             }
-
         }
         f += &p;
+
+        // The learning rate of a weight set, whose count it increments: lr * (1 + lrBoost * 16 / (16 + count)).
+        // err = (bit - squash(dot)) * rate
+        write!(
+            f,
+            "(func $rate (param $w i32) (result f64) (local $n i32)
+  (i32.store (local.get $w) (i32.add (local.tee $n (i32.load (local.get $w))) (i32.const 1)))
+  (f64.mul {lr} (f64.add (f64.const 1) (f64.div {boost} (f64.add (f64.const 16) (f64.convert_i32_u (local.get $n)))))))\n",
+            lr = f64c(learning_rate),
+            boost = if lr_boost * 16. == 0. { "(f64.const 0)".to_owned() } else { f64c(lr_boost * 16.) },
+        )?;
 
         // Learn
         let mut l = String::from("(func $l (param $bit i32) (local $i i32) (local $x f64) (local $fb f64) (local $n i32) (local $v v128) (local $u v128)\n");
@@ -1101,14 +1140,7 @@ impl<'a> Gen<'a> {
             }
         }
         for s in 0..k {
-            // err = (bit - squash(dot)) * (lr * (1 + lrBoost * 16 / (16 + count)))
-            write!(
-                l,
-                "(i32.store (global.get $w{s}) (i32.add (local.tee $n (i32.load (global.get $w{s}))) (i32.const 1)))
-(local.set $e{s} (f64.mul (f64.sub (local.get $fb) (local.get $e{s})) (f64.mul {lr} (f64.add (f64.const 1) (f64.div {boost} (f64.add (f64.const 16) (f64.convert_i32_u (local.get $n))))))))\n",
-                lr = f64c(learning_rate),
-                boost = if lr_boost * 16. == 0. { "(f64.const 0)".to_owned() } else { f64c(lr_boost * 16.) },
-            )?;
+            write!(l, "(local.set $e{s} (f64.mul (f64.sub (local.get $fb) (local.get $e{s})) (call $rate (global.get $w{s}))))\n")?;
         }
         l += &self.weight_updates(k, inputs, n8);
         write!(
@@ -1124,16 +1156,13 @@ impl<'a> Gen<'a> {
         }
         l += "(call $learn_byte (local.get $bit))\n";
         l += learn_models;
+        let same_limit = apms.iter().all(|apm| apm.limit == apms[0].limit);
         for (j, apm) in apms.iter().enumerate() {
-            let (probs, counts, _) = apm_tables[j];
-            // The counts are at the same index as the probabilities
+            let limit = if same_limit { String::new() } else { format!(" (i32.const {})", apm.limit) };
             write!(
                 l,
-                "(local.set $i (i32.add (i32.const {}) (i32.shr_u (i32.sub (global.get $a{j}) (i32.const {probs})) (i32.const 1))))
-(call $apm_l (global.get $a{j}) (local.get $i) (f64.sub (f64.const 1) (global.get $af)) (local.get $fb) (i32.const {limit}))
-(call $apm_l (i32.add (global.get $a{j}) (i32.const 8)) (i32.add (local.get $i) (i32.const 4)) (global.get $af) (local.get $fb) (i32.const {limit}))\n",
-                counts,
-                limit = apm.limit
+                "(call $apm_l (global.get $a{j}) (f64.sub (f64.const 1) (global.get $af)) (local.get $fb){limit})
+(call $apm_l (i32.add (global.get $a{j}) (i32.const 8)) (global.get $af) (local.get $fb){limit})\n"
             )?;
         }
         l += "(call $next_bit (local.get $bit)))\n";
@@ -1279,6 +1308,16 @@ const CORE: &str = r#"
 (func $u24 (param $v i32) (result f64)
   (f64.mul (f64.mul (f64.convert_i32_u (local.get $v)) (f64.const 0x1.000001p-24)) (f64.const 0x1.0000000000010p+0)))
 
+;; Moves the counter at `at` towards bit, as learnCounter
+;; and match_model.js
+(func $learn (param $at i32) (param $bit i32) (param $max i32) (param $offset f64) (local $v i32) (local $count i32)
+  (local.set $count (i32.shr_u (local.tee $v (i32.load (local.get $at))) (i32.const 24)))
+  (local.set $count (i32.add (local.get $count) (i32.lt_u (local.get $count) (local.get $max))))
+  (i32.store (local.get $at) (i32.or (i32.and (i32.add (local.tee $v (i32.and (local.get $v) (i32.const 0xffffff)))
+    (i32.trunc_f64_s (f64.mul {U24F} (f64.div (f64.sub (f64.convert_i32_u (local.get $bit)) (call $u24 (local.get $v)))
+      (f64.add (f64.convert_i32_u (local.get $count)) (local.get $offset))))))
+    (i32.const 0xffffff)) (i32.shl (local.get $count) (i32.const 24)))))
+
 ;; The hash of the Rust encoder, as hash in utils.js
 (func $hash (param $v i32) (param $shift i32) (result i32)
   (i32.shr_u (i32.mul (i32.xor (local.get $v) (i32.shr_u (local.get $v) (local.get $shift))) (i32.const 0x9E35A7BD)) (local.get $shift)))
@@ -1388,17 +1427,8 @@ const COUNTERS: &str = r#"
 (func $context_hash (param $hi i32) (param $lo i32) (param $magic i32) (result i32)
   (i32.mul (i32.add (i32.add (i32.mul (call $hash (local.get $hi) (i32.const 3)) (i32.const 9)) (call $hash (local.get $lo) (i32.const 3))) (i32.const 1)) (local.get $magic)))
 
-;; Moves the counter at `at` towards bit, as learnCounter
-(func $learn (param $at i32) (param $bit i32) (param $max i32) (local $v i32) (local $count i32)
-  (local.set $count (i32.shr_u (local.tee $v (i32.load (local.get $at))) (i32.const 24)))
-  (local.set $count (i32.add (local.get $count) (i32.lt_u (local.get $count) (local.get $max))))
-  (i32.store (local.get $at) (i32.or (i32.and (i32.add (local.tee $v (i32.and (local.get $v) (i32.const 0xffffff)))
-    (i32.trunc_f64_s (f64.mul {U24F} (f64.div (f64.sub (f64.convert_i32_u (local.get $bit)) (call $u24 (local.get $v)))
-      (f64.add (f64.convert_i32_u (local.get $count)) {OFFSET})))))
-    (i32.const 0xffffff)) (i32.shl (local.get $count) (i32.const 24)))))
-
 ;; The inputs of all context models, as CounterModel.p
-(func $cm_p (local $v v128) (local $r i32) (local $bc i32) (local $e i32) (local $k i32) (local $c i32) (local $slot i32) (local $info i32) (local $w i32) (local $in i32) (local $p f64) (local $count i32)
+(func $cm_p (local $v v128) (local $r i32) (local $bc i32) (local $e i32) (local $k i32) (local $c i32) (local $slot i32) (local $info i32) (local $w i32) (local $in i32) (local $p f64) (local $count i32) (local $sg f64)
   ;; First the slot of each model in turn, without branches, so that their memory loads overlap.
   ;; The model takes the counter, slot info and state counter as it finds them, before the next
   ;; model may take the slot over.
@@ -1434,6 +1464,9 @@ const COUNTERS: &str = r#"
   (loop $model
     (local.set $in (i32.load offset=32 (local.get $r)))
     (local.set $count (i32.const 0))
+    ;; A Record predicts whether each bit is the one of the expected byte: its inputs are negated
+    ;; for an expected 0
+    (local.set $sg (f64.convert_i32_s (i32.sub (i32.const 1) (i32.and (i32.shr_u (i32.shl (i32.load offset=48 (local.get $r)) (i32.const 1)) (i32.sub (i32.const 7) (global.get $bits))) (i32.const 2)))))
     (if (i32.load offset=4 (local.get $r))
       (then
         (local.set $bc (i32.load offset=28 (local.get $r)))
@@ -1449,21 +1482,7 @@ const COUNTERS: &str = r#"
               (i32.and (i32.shr_u (local.get $info) (i32.sub (i32.const 7) (global.get $bits))) (i32.const 1)))) {IN3}))
             (else (f64.const 0))))
         (f64.store offset=32 (local.get $in) (select (f64.const 0) {IN4} (local.tee $count (i32.shr_u (local.get $w) (i32.const 24))))))
-      (else
-        (f64.store (local.get $in) (f64.const 0))
-        (f64.store offset=8 (local.get $in) (f64.const 0))
-        (f64.store offset=16 (local.get $in) (f64.const 0))
-        (f64.store offset=24 (local.get $in) (f64.const 0))
-        (f64.store offset=32 (local.get $in) (f64.const 0))))
-    ;; A Record predicts whether each bit is the one of the expected byte: its inputs are negated
-    ;; for an expected 0
-    (if (i32.and (i32.shr_u (i32.load offset=48 (local.get $r)) (i32.sub (i32.const 7) (global.get $bits))) (i32.const 1))
-      (then
-        (f64.store (local.get $in) (f64.neg (f64.load (local.get $in))))
-        (f64.store offset=8 (local.get $in) (f64.neg (f64.load offset=8 (local.get $in))))
-        (f64.store offset=16 (local.get $in) (f64.neg (f64.load offset=16 (local.get $in))))
-        (f64.store offset=24 (local.get $in) (f64.neg (f64.load offset=24 (local.get $in))))
-        (f64.store offset=32 (local.get $in) (f64.neg (f64.load offset=32 (local.get $in))))))
+      (else {ZERO_INPUTS}))
     {CM_STATE}
     (br_if $model (i32.ne (local.tee $r (i32.add (local.get $r) (i32.const 128))) (i32.const {CMEND})))))
 
@@ -1473,8 +1492,8 @@ const COUNTERS: &str = r#"
   (loop $model
     (local.set $b (i32.xor (local.get $bit) (i32.and (i32.shr_u (i32.load offset=48 (local.get $r)) (i32.sub (i32.const 7) (global.get $bits))) (i32.const 1))))
     (if (i32.load offset=4 (local.get $r)) (then
-      (call $learn (local.tee $slot (i32.load offset=8 (local.get $r))) (local.get $b) (i32.load offset=36 (local.get $r)))
-      (call $learn (i32.load offset=12 (local.get $r)) (local.get $b) (i32.const 127))
+      (call $learn (local.tee $slot (i32.load offset=8 (local.get $r))) (local.get $b) (i32.load offset=36 (local.get $r)) {OFFSET})
+      (call $learn (i32.load offset=12 (local.get $r)) (local.get $b) (i32.const 127) {OFFSET})
       ;; The bit history state: the last 7 bits after a leading 1
       (local.set $s (i32.or (i32.shl (select (local.tee $s (i32.and (i32.shr_u (local.tee $info (i32.load offset=4 (local.get $slot))) (i32.const 8)) (i32.const 255))) (i32.const 1) (local.get $s)) (i32.const 1)) (local.get $b)))
       (i32.store offset=4 (local.get $slot) (i32.or (i32.and (local.get $info) (i32.const 0xffff00ff))
@@ -1503,6 +1522,16 @@ const STRETCHES: &str = "(f64.store (local.get $in) (f64.mul (call $stretch (loc
 const STRETCHES_SIMD: &str = "(local.set $v (call $stretch2 (f64x2.replace_lane 1 (f64x2.splat (local.get $p)) (call $u24 (i32.and (i32.load offset=92 (local.get $r)) (i32.const 0xffffff))))))
         (f64.store (local.get $in) (f64.mul (f64x2.extract_lane 0 (local.get $v)) {IN0}))
         (f64.store offset=16 (local.get $in) (f64.mul (f64x2.extract_lane 1 (local.get $v)) {IN2}))";
+
+/// The inputs of a context model without a context
+const ZERO_INPUTS: &str = "(f64.store (local.get $in) (f64.const 0))
+        (f64.store offset=8 (local.get $in) (f64.const 0))
+        (f64.store offset=16 (local.get $in) (f64.const 0))
+        (f64.store offset=24 (local.get $in) (f64.const 0))
+        (f64.store offset=32 (local.get $in) (f64.const 0))";
+const ZERO_INPUTS_SIMD: &str = "(v128.store (local.get $in) (v128.const i64x2 0 0))
+        (v128.store offset=16 (local.get $in) (v128.const i64x2 0 0))
+        (f64.store offset=32 (local.get $in) (f64.const 0))";
 
 /// The state of a context model for a ContextMixer: the count of its counter, or 0
 const CM_STATE: &str = "(i32.store (i32.load offset=52 (local.get $r)) (local.get $count))";
@@ -1947,10 +1976,23 @@ const JS_NEXT_TOKEN_MAP: &str = r#"
   (i32.store offset=8 (local.get $at) (i32.const 1)))
 "#;
 
+/// How $mm_l picks the candidate: the second match whose next byte differs from the first, or
+/// the longest
+const MM_SECOND: &str = r#"(if (i32.ge_u (local.get $l) (local.get $min)) (then
+                  (if (i32.lt_s (local.get $first) (i32.const 0))
+                    (then (local.set $first (i32.load8_u offset={OUT} (local.get $cand))))
+                    (else (if (i32.ne (local.get $first) (i32.load8_u offset={OUT} (local.get $cand))) (then
+                      (local.set $best (local.get $l))
+                      (local.set $bestPtr (local.get $cand))
+                      (br $done)))))))"#;
+const MM_LONGEST: &str = r#"(if (i32.gt_u (local.get $l) (local.get $best)) (then
+                  (local.set $best (local.get $l))
+                  (local.set $bestPtr (local.get $cand))))"#;
+
 /// Match models, as match_model.js. A record of 64 bytes each: 0 min length, 4 candidates, 8 flags,
 /// 12 match pointer, 16 active, 20 length, 24 misses, 28 whether the byte missed, 32 address of
-/// the counter, 36 expected bit, 40 state, 44 address of the inputs, 48 head, 52 chain, 56 probs,
-/// 60 counts, and the address of the state for the mixer at 0 of the next... see $mm_new
+/// the counter, 36 expected bit, 40 state, 44 address of the inputs, 48 head, 52 chain, 56 the
+/// counters, which keep their count in the top byte like those of the context models
 const MATCH: &str = r#"
 (global $mr (mut i32) (i32.const {MM0}))
 (global $tp (mut i32) (i32.const {MM_REGION}))
@@ -1967,7 +2009,6 @@ const MATCH: &str = r#"
   (i32.store offset=48 (local.get $r) (call $tables (i32.const 0x1000000)))
   (i32.store offset=52 (local.get $r) (call $tables (i32.const {MM_CHAIN})))
   (i32.store offset=56 (local.get $r) (local.tee $probs (call $tables (i32.const 0x1200000))))
-  (i32.store offset=60 (local.get $r) (call $tables (i32.const 0x480000)))
   (i32.store offset=32 (local.get $r) (global.get $mi))
   (i32.store (local.get $probs) (i32.const 0x7fffff))
   (call $rep (local.get $probs) (i32.const 4) (i32.const 0x1200000))
@@ -1990,25 +2031,21 @@ const MATCH: &str = r#"
             (then (i32.add (i32.const 63) (i32.load offset=24 (local.get $r))))
             (else (if (result i32) (i32.lt_u (local.get $len) (i32.const 16))
               (then (local.get $len))
-              (else (i32.add (i32.add (i32.const 16) (i32.shl (i32.sub (local.get $log) (i32.const 4)) (i32.const 2)))
+              (else (i32.add (i32.shl (local.get $log) (i32.const 2))
                 (i32.and (i32.shr_u (local.get $len) (i32.sub (local.get $log) (i32.const 2))) (i32.const 3)))))))
-          (i32.const 8)) (select (local.get $e) (i32.const 0) (i32.and (i32.load offset=8 (local.get $r)) (i32.const 1)))) (i32.const 8)) (global.get $bc)))
+          (i32.const 8)) {MM_EXPECTED}) (i32.const 8)) (global.get $bc)))
       (i32.store offset=40 (local.get $r) (local.get $i))
-      (local.set $p (call $stretch (f64.div (f64.convert_i32_s (i32.load (i32.add (i32.load offset=56 (local.get $r)) (i32.shl (local.get $i) (i32.const 2))))) {U24F})))
-      (if (i32.eqz (i32.load offset=36 (local.get $r))) (then (local.set $p (f64.neg (local.get $p)))))))
+      (local.set $p (call $stretch (call $u24 (i32.and (i32.load (i32.add (i32.load offset=56 (local.get $r)) (i32.shl (local.get $i) (i32.const 2)))) (i32.const 0xffffff)))))
+      (local.set $p (select (local.get $p) (f64.neg (local.get $p)) (i32.load offset=36 (local.get $r))))))
     (f64.store (local.get $in) (local.get $p))
     {MM_INPUT}
-    (br_if $model (i32.ne (local.tee $r (i32.add (local.get $r) (i32.const 64))) (i32.const {MMEND})))))
-(func $mm_l (param $bit i32) (local $r i32) (local $i i32) (local $count i32) (local $pos i32) (local $hash i32) (local $slot i32) (local $cand i32) (local $n i32) (local $best i32) (local $bestPtr i32) (local $first i32) (local $l i32) (local $min i32) (local $chain i32)
+    (br_if $model (i32.ne (local.tee $r (i32.sub (local.get $r) (i32.const -64))) (i32.const {MMEND})))))
+(func $mm_l (param $bit i32) (local $r i32) (local $i i32) (local $pos i32) (local $hash i32) (local $slot i32) (local $cand i32) (local $n i32) (local $best i32) (local $bestPtr i32) (local $first i32) (local $l i32) (local $min i32) (local $chain i32)
   (local.set $r (i32.const {MM0}))
   (loop $model
     (if (i32.and (i32.ne (i32.load offset=16 (local.get $r)) (i32.const 0)) (i32.eqz (i32.load offset=28 (local.get $r)))) (then
-      (i32.store8 (local.tee $i (i32.add (i32.load offset=60 (local.get $r)) (i32.load offset=40 (local.get $r))))
-        (local.tee $count (select (local.tee $count (i32.add (i32.load8_u (local.get $i)) (i32.const 1))) (i32.const 255) (i32.lt_u (local.get $count) (i32.const 255)))))
-      (i32.store (local.tee $i (i32.add (i32.load offset=56 (local.get $r)) (i32.shl (i32.load offset=40 (local.get $r)) (i32.const 2))))
-        (i32.add (local.tee $n (i32.load (local.get $i))) (i32.trunc_f64_s (f64.mul {U24F} (f64.div
-          (f64.sub (f64.convert_i32_u (local.tee $l (i32.eq (local.get $bit) (i32.load offset=36 (local.get $r))))) (f64.div (f64.convert_i32_s (local.get $n)) {U24F}))
-          (f64.add (f64.convert_i32_u (local.get $count)) (f64.const 0.2)))))))
+      (call $learn (i32.add (i32.load offset=56 (local.get $r)) (i32.shl (i32.load offset=40 (local.get $r)) (i32.const 2)))
+        (local.tee $l (i32.eq (local.get $bit) (i32.load offset=36 (local.get $r)))) (i32.const 255) (f64.const 0.2))
       (if (i32.eqz (local.get $l)) (then
         (i32.store offset=20 (local.get $r) (i32.const 0))
         (i32.store offset=24 (local.get $r) (local.tee $n (i32.add (i32.load offset=24 (local.get $r)) (i32.const 1))))
@@ -2049,17 +2086,7 @@ const MATCH: &str = r#"
                   (i32.load8_u offset={OUT} (i32.sub (i32.sub (local.get $pos) (i32.const 1)) (local.get $l)))))
                 (local.set $l (i32.add (local.get $l) (i32.const 1)))
                 (br $compare)))
-              (if (i32.and (i32.load offset=8 (local.get $r)) (i32.const 2))
-                (then (if (i32.ge_u (local.get $l) (local.get $min)) (then
-                  (if (i32.lt_s (local.get $first) (i32.const 0))
-                    (then (local.set $first (i32.load8_u offset={OUT} (local.get $cand))))
-                    (else (if (i32.ne (local.get $first) (i32.load8_u offset={OUT} (local.get $cand))) (then
-                      (local.set $best (local.get $l))
-                      (local.set $bestPtr (local.get $cand))
-                      (br $done))))))))
-                (else (if (i32.gt_u (local.get $l) (local.get $best)) (then
-                  (local.set $best (local.get $l))
-                  (local.set $bestPtr (local.get $cand))))))
+              {MM_PICK}
               (local.set $cand (i32.load (i32.add (i32.load offset=52 (local.get $r)) (i32.shl (local.get $cand) (i32.const 2)))))
               (local.set $n (i32.add (local.get $n) (i32.const 1)))
               (br $candidate)))
@@ -2070,7 +2097,7 @@ const MATCH: &str = r#"
               (i32.store offset=24 (local.get $r) (i32.const 0))))))
           (i32.store (local.get $chain) (i32.load (local.get $slot)))
           (i32.store (local.get $slot) (local.get $pos))))))
-    (br_if $model (i32.ne (local.tee $r (i32.add (local.get $r) (i32.const 64))) (i32.const {MMEND})))))
+    (br_if $model (i32.ne (local.tee $r (i32.sub (local.get $r) (i32.const -64))) (i32.const {MMEND})))))
 "#;
 
 /// Match predictors, as match_predictor.js: a record of 48 bytes each: 0 address of the keys
