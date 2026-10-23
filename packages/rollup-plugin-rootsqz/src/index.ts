@@ -91,7 +91,7 @@ export type RootsqzOptions = {
 
   /**
    * Pack the output as a Brotli stream decoded with `DecompressionStream('brotli')` (`--brotli`).
-   * Cannot be combined with `config`, `report` or a `64k` size profile.
+   * Cannot be combined with `config`, `report`, `wasmDecoder` or a `64k` size profile.
    */
   brotli?: boolean;
 
@@ -142,6 +142,12 @@ export type RootsqzOptions = {
    * By default `"sliced"` with a loader script, otherwise `"serial"`.
    */
   decoder?: Decoder;
+
+  /**
+   * Decode with a WebAssembly decoder generated for the model config (`--wasm-decoder`), with any
+   * `decoder`. It decodes several times as fast as the JavaScript decoder, but takes more bytes.
+   */
+  wasmDecoder?: boolean;
 
   /**
    * Title of the page, set before the output decompresses (`--title`).
@@ -212,15 +218,15 @@ export type RootsqzOptions = {
  *
  * @param options Options of the plugin.
  * @returns The plugin, for the `plugins` array of the Rollup or Vite config.
- * @throws If `brotli` is combined with `config`, a report option or a `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option, `wasmDecoder` or a `64k` size profile.
  */
 export default function (options: RootsqzOptions = {}): Plugin {
   const envReport = !["", "0", "false"].includes(process.env.ROOTSQZ_REPORT ?? "");
   const wantsReport = Boolean(options.report || envReport || options.reportModels || options.reportDetail?.length ||
     Object.keys(options.reportWasmDebug ?? {}).length);
   const wasmDebug = new Map(Object.entries(options.reportWasmDebug ?? {}).map(([file, debug]) => [path.resolve(file), path.resolve(debug)]));
-  if (options.brotli && (options.config || wantsReport || options.sizeProfile !== undefined && options.sizeProfile !== "4k")) {
-    throw new Error('The "brotli" option cannot be combined with "config", "report" or a "64k" size profile.');
+  if (options.brotli && (options.config || wantsReport || options.wasmDecoder || options.sizeProfile !== undefined && options.sizeProfile !== "4k")) {
+    throw new Error('The "brotli" option cannot be combined with "config", "report", "wasmDecoder" or a "64k" size profile.');
   }
 
   const isBuild = process.env.NODE_ENV === "production";
@@ -475,6 +481,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
           report: wantsReport,
           loader: options.loader,
           decoder: options.decoder,
+          wasmDecoder: options.wasmDecoder,
           title: options.title,
           bootJs: options.bootJs,
           search: options.search,

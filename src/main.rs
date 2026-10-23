@@ -431,6 +431,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                     marker: runs.marker,
                     lengths: runs.decoded.iter().map(Vec::len).collect(),
                 }),
+                wasm: None,
             },
             size,
             encoded_data,
@@ -562,6 +563,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 decoder: Decoder::Serial,
                 boot_js: None,
                 base64: None,
+                wasm: None,
             },
             input_bytes.len(),
             encoded_data,
@@ -623,6 +625,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 decoder: Decoder::Serial,
                 boot_js: None,
                 base64: None,
+                wasm: None,
             },
             input.len(),
             encoded,
@@ -673,6 +676,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 decoder: Decoder::Serial,
                 boot_js: None,
                 base64: None,
+                wasm: None,
             },
             input_bytes.len(),
             encoded_data,
@@ -718,6 +722,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                         decoder,
                         boot_js: with_loader.then(|| "document.title = 'x';".to_owned()),
                         base64: None,
+                        wasm: None,
                     },
                     input.len(),
                     encoded_data.clone(),
@@ -872,6 +877,7 @@ decompressSliced(model, new Uint8Array(fs.readFileSync(import.meta.dirname + "/i
                 decoder: Decoder::Serial,
                 boot_js: None,
                 base64: None,
+                wasm: None,
             },
             input_bytes.len(),
             encoded_data,
@@ -899,5 +905,155 @@ decompressSliced(model, new Uint8Array(fs.readFileSync(import.meta.dirname + "/i
             output_data.as_slice(),
             "Decompressed data does not match original input"
         );
+    }
+}
+
+#[cfg(test)]
+mod wasm_decoder_tests {
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    use crate::compressor::compress_config::{CompressConfig, StreamLayout};
+    use crate::compressor::model_finder::SIZE_64K_FAST_CONFIG_JSON;
+    use crate::compressor::Encoder;
+    use crate::web::output_generator::{
+        self, insert_wasm, render_output, wasm_glue, Decoder, Loader, OutputGenerationOptions,
+    };
+    use crate::web::wasm_decoder::{self, WasmOptions};
+
+    fn config() -> CompressConfig {
+        let mut config: CompressConfig = serde_json::from_str(SIZE_64K_FAST_CONFIG_JSON).unwrap();
+        config.static_model_params.hash_table_pow2_size = 20;
+        config
+    }
+
+    fn encode(config: &CompressConfig, input: &[u8]) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        let mut encoder = Encoder::new(config.create_model().unwrap(), &mut encoded).unwrap();
+        encoder.encode_section(input).unwrap();
+        encoder.finish().unwrap();
+        encoded
+    }
+
+    /// The node output with the WebAssembly decoder decodes the input
+    #[test]
+    pub fn node_round_trip() {
+        let config = config();
+        let input = std::fs::read("tests/ray_tracer/index.js").unwrap();
+        let encoded = encode(&config, &input);
+        let output_dir = PathBuf::from("testout/wasm_node_round_trip");
+        render_output(
+            OutputGenerationOptions {
+                output_dir: output_dir.clone(),
+                target: output_generator::Target::Node,
+                model_config: config.model.clone(),
+                static_model_params: config.static_model_params.clone(),
+                layout: StreamLayout::default(),
+                loader: None,
+                decoder: Decoder::Serial,
+                boot_js: None,
+                base64: None,
+                wasm: Some(WasmOptions::default()),
+            },
+            input.len(),
+            encoded,
+            input.len(),
+            vec![],
+            vec![],
+        )
+        .unwrap();
+        assert!(Command::new("node").arg(output_dir.join("index.mjs")).status().unwrap().success());
+        assert_eq!(std::fs::read(output_dir.join("output.bin")).unwrap(), input);
+    }
+
+    /// Decodes with the glue of the worker and sliced decoders in node, and checks the output
+    /// and the progress
+    #[test]
+    pub fn worker_and_sliced_round_trip() {
+        let config = config();
+        let input = std::fs::read("tests/ray_tracer/index.js").unwrap();
+        let encoded = encode(&config, &input);
+        let module = wasm_decoder::generate(
+            &config.model,
+            &config.static_model_params,
+            &StreamLayout::default(),
+            encoded.len(),
+            input.len(),
+            WasmOptions::default(),
+        )
+        .unwrap();
+        for (decoder, run) in [
+            (
+                Decoder::Worker,
+                r#"globalThis.postMessage = message => {
+    if (typeof message == "number") return progress.push(message);
+    fs.writeFileSync(dir + "/output.bin", message);
+    fs.writeFileSync(dir + "/progress.json", JSON.stringify(progress));
+};
+decompressWorker(input);"#,
+            ),
+            (
+                Decoder::Sliced,
+                r#"globalThis.rsqz = { progress: (done, total) => progress.push(done) };
+decompressSliced(input, output => {
+    fs.writeFileSync(dir + "/output.bin", output);
+    fs.writeFileSync(dir + "/progress.json", JSON.stringify(progress));
+    process.exit(0);
+});"#,
+            ),
+        ] {
+            let dir = Path::new("testout/wasm_glue").join(format!("{decoder:?}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("input.pack"), &encoded).unwrap();
+            let glue = insert_wasm(&wasm_glue(&module, encoded.len(), input.len(), decoder), &module.bytes).unwrap();
+            let script = format!(
+                "import fs from 'node:fs';\nlet dir = import.meta.dirname, progress = [];\nlet input = new Uint8Array(fs.readFileSync(dir + '/input.pack'));\n{glue}\n{run}\n"
+            );
+            std::fs::write(dir.join("index.mjs"), script).unwrap();
+            assert!(Command::new("node").arg(dir.join("index.mjs")).status().unwrap().success());
+            assert_eq!(std::fs::read(dir.join("output.bin")).unwrap(), input, "{decoder:?}");
+            let progress: Vec<usize> =
+                serde_json::from_slice(&std::fs::read(dir.join("progress.json")).unwrap()).unwrap();
+            assert!(!progress.is_empty(), "{decoder:?} should report progress");
+            assert!(progress.windows(2).all(|pair| pair[0] < pair[1]));
+            assert!(progress.iter().all(|&done| done <= input.len()));
+        }
+    }
+
+    /// Renders the web output with the WebAssembly decoder and every decoder, with and without a loader
+    #[test]
+    pub fn web_decoders() {
+        let config = config();
+        let input = b"document.body.append('loaded');";
+        let encoded = encode(&config, input);
+        for decoder in [Decoder::Serial, Decoder::Sliced, Decoder::Worker] {
+            for with_loader in [false, true] {
+                let loader = with_loader.then(|| Loader {
+                    html: Some(include_str!("web/templates/web/loaders/bar.html").to_owned()),
+                    js: Some(include_str!("web/templates/web/loaders/bar.js").to_owned()),
+                    keep: true,
+                });
+                render_output(
+                    OutputGenerationOptions {
+                        output_dir: PathBuf::from(format!("testout/wasm_web_decoders/{decoder:?}_{with_loader}")),
+                        target: output_generator::Target::Web,
+                        model_config: config.model.clone(),
+                        static_model_params: config.static_model_params.clone(),
+                        layout: StreamLayout::default(),
+                        loader,
+                        decoder,
+                        boot_js: None,
+                        base64: None,
+                        wasm: Some(WasmOptions::default()),
+                    },
+                    input.len(),
+                    encoded.clone(),
+                    input.len(),
+                    vec![],
+                    vec![],
+                )
+                .unwrap_or_else(|e| panic!("{decoder:?}, loader {with_loader}: {e:?}"));
+            }
+        }
     }
 }

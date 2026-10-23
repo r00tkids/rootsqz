@@ -208,7 +208,7 @@ export type CompressOptions = RunOptions & {
 
   /**
    * Pack the output as a Brotli stream decoded with `DecompressionStream('brotli')` (`--brotli`).
-   * Cannot be combined with `config`, `report` or a `64k` size profile.
+   * Cannot be combined with `config`, `report`, `wasmDecoder` or a `64k` size profile.
    */
   brotli?: boolean;
 
@@ -267,6 +267,13 @@ export type CompressOptions = RunOptions & {
   decoder?: Decoder;
 
   /**
+   * Decode with a WebAssembly decoder generated for the model config (`--wasm-decoder`), with any
+   * `decoder`. It decodes several times as fast as the JavaScript decoder, but takes more bytes.
+   * Cannot be combined with `brotli`.
+   */
+  wasmDecoder?: boolean;
+
+  /**
    * Title of the web page (`--title`), set before the web output decompresses.
    */
   title?: string;
@@ -314,11 +321,11 @@ function wantsReport(options: CompressOptions): boolean {
 /**
  * Command line arguments of the executable for the given options.
  *
- * @throws If `brotli` is combined with `config`, a report option or a `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option, `wasmDecoder` or a `64k` size profile.
  */
 export function compressArgs(options: CompressOptions): string[] {
-  if (options.brotli && (options.config || wantsReport(options) || options.sizeProfile !== undefined && options.sizeProfile !== "4k")) {
-    throw new Error('The "brotli" option cannot be combined with "config", "report" or a "64k" size profile.');
+  if (options.brotli && (options.config || wantsReport(options) || options.wasmDecoder || options.sizeProfile !== undefined && options.sizeProfile !== "4k")) {
+    throw new Error('The "brotli" option cannot be combined with "config", "report", "wasmDecoder" or a "64k" size profile.');
   }
 
   const args: string[] = ["--js-main", options.jsMain];
@@ -362,6 +369,9 @@ export function compressArgs(options: CompressOptions): string[] {
   if (options.decoder) {
     args.push("--decoder", options.decoder);
   }
+  if (options.wasmDecoder) {
+    args.push("--wasm-decoder");
+  }
   if (options.title !== undefined) {
     args.push("--title", options.title);
   }
@@ -403,7 +413,7 @@ export function compressArgs(options: CompressOptions): string[] {
  * Packs and compresses a JavaScript file and further files into the output directory.
  * Rejects if the executable cannot be started or exits with a code other than 0.
  *
- * @throws If `brotli` is combined with `config`, a report option or a `64k` size profile.
+ * @throws If `brotli` is combined with `config`, a report option, `wasmDecoder` or a `64k` size profile.
  */
 export function compress(options: CompressOptions): Promise<void> {
   return run(compressArgs(options), options);

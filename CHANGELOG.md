@@ -6,6 +6,9 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Added
+- `--wasm-decoder` (`wasmDecoder` in the Node API and the plugin) decodes with a WebAssembly decoder instead of the JavaScript one, with any `--decoder`, for the `web` and `node` targets. It is generated from the config like the JavaScript decoder and decodes several times as fast, for some more bytes. Outputs without it are unchanged.
+
 ## [0.15.0] - 2026-10-22
 
 ### Added

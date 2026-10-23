@@ -6,9 +6,10 @@ use std::{
 };
 
 use crate::compressor::records::BLOCK;
+use crate::web::wasm_decoder::{self, WasmOptions};
 use crate::compressor::compress_config::{ModelConfig, StaticModelParams, StreamLayout};
 use crate::compressor::mixer::{ApmContext, Selector};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use bitflags::bitflags;
 use clap::ValueEnum;
 use handlebars::Handlebars;
@@ -31,6 +32,8 @@ pub struct OutputGenerationOptions {
     pub boot_js: Option<String>,
     /// Base64 runs taken out of the main JavaScript, which the decoder puts back
     pub base64: Option<Base64Runs>,
+    /// Decode with a WebAssembly decoder instead of the JS one
+    pub wasm: Option<WasmOptions>,
 }
 
 /// Base64 runs taken out of the main JavaScript. The stream has the JavaScript with a marker
@@ -601,22 +604,42 @@ pub fn render_output(
         decoder,
         boot_js,
         base64,
+        wasm,
     } = output_options;
 
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
-    let mut features_used = ModelRef::None;
-    let mut decompression_code = generate_js_decompression_code(
-        &model_config,
-        &static_model_params,
-        &layout,
-        &mut features_used,
-    );
-    // Only the decoder that the boot code calls is included
-    decompression_code += match decoder {
-        Decoder::Serial => include_str!("js_source/decompress.js"),
-        Decoder::Sliced => include_str!("js_source/coder_sliced.js"),
-        Decoder::Worker => include_str!("js_source/coder_worker.js"),
+    // The node output decodes in one go
+    let decoder = if target == Target::Node { Decoder::Serial } else { decoder };
+    let (decompression_code, wasm_bytes) = match wasm {
+        Some(options) => {
+            let module = wasm_decoder::generate(
+                &model_config,
+                &static_model_params,
+                &layout,
+                encoded_data.len(),
+                size_before_compression,
+                options,
+            )?;
+            info!("WebAssembly decoder: {} bytes", module.bytes.len());
+            (wasm_glue(&module, encoded_data.len(), size_before_compression, decoder), Some(module.bytes))
+        }
+        None => {
+            let mut features_used = ModelRef::None;
+            let mut decompression_code = generate_js_decompression_code(
+                &model_config,
+                &static_model_params,
+                &layout,
+                &mut features_used,
+            );
+            // Only the decoder that the boot code calls is included
+            decompression_code += match decoder {
+                Decoder::Serial => include_str!("js_source/decompress.js"),
+                Decoder::Sliced => include_str!("js_source/coder_sliced.js"),
+                Decoder::Worker => include_str!("js_source/coder_worker.js"),
+            };
+            (decompression_code, None)
+        }
     };
 
     Ok(match target {
@@ -691,6 +714,7 @@ pub fn render_output(
                 loader.as_ref(),
                 decoder,
                 boot_js.as_deref(),
+                wasm_bytes.as_deref(),
             )?;
 
             let html_header_str = html_header(deflated_code.len())?;
@@ -741,10 +765,17 @@ pub fn render_output(
                     "decompressor",
                     html_header_bytes.len(),
                     deflated_code.len(),
-                    format!(
-                        "decompressor JavaScript, {} bytes minified, deflated",
-                        decompressor_code_ugly.len()
-                    ),
+                    match &wasm_bytes {
+                        Some(bytes) => format!(
+                            "decompressor JavaScript, {} bytes minified, with the WebAssembly decoder of {} bytes, deflated",
+                            decompressor_code_ugly.len() - js_string_literal(bytes).len(),
+                            bytes.len()
+                        ),
+                        None => format!(
+                            "decompressor JavaScript, {} bytes minified, deflated",
+                            decompressor_code_ugly.len()
+                        ),
+                    },
                 ),
                 OutputPart::new(
                     "compressed stream",
@@ -784,7 +815,11 @@ pub fn render_output(
                 .render_template(
                     include_str!("templates/node/index.mjs"),
                     &json!({
-                        "decompressor_source": decompression_code,
+                        "decompressor_source": match &wasm_bytes {
+                            Some(bytes) => insert_wasm(&decompression_code, bytes)?,
+                            None => decompression_code,
+                        },
+                        "wasm": wasm_bytes.is_some(),
                         "encoded_len": encoded_data.len(),
                         "decoded_len": size_before_compression,
                         "input_file": "input.pack",
@@ -838,6 +873,7 @@ fn boot_code(
     loader: Option<&Loader>,
     decoder: Decoder,
     boot_js: Option<&str>,
+    wasm: Option<&[u8]>,
 ) -> Result<(String, Vec<u8>)> {
     let decompressor_code = Handlebars::new()
         .render_template(
@@ -858,13 +894,18 @@ fn boot_code(
                 "sliced": decoder == Decoder::Sliced,
                 "worker": decoder == Decoder::Worker,
                 "boot_js": boot_js,
+                "wasm": wasm.is_some(),
             }),
         )
         .context("Failed to render decompression code template")?;
 
     // The loader and boot scripts are part of the boot code, so a syntax error in them fails here
-    let decompressor_code_ugly = uglify_src(&decompressor_code)
+    let mut decompressor_code_ugly = uglify_src(&decompressor_code)
         .context("Failed to minify the boot code, including the loader and boot scripts")?;
+    if let Some(bytes) = wasm {
+        // After minifying, which would escape the bytes
+        decompressor_code_ugly = insert_wasm(&decompressor_code_ugly, bytes)?;
+    }
 
     info!(
         "Decompression code size before deflate: {}",
@@ -926,8 +967,51 @@ pub fn web_overhead(
         None,
         Decoder::Serial,
         None,
+        None,
     )?;
     Ok(html_header(deflated_code.len())?.len() + deflated_code.len())
+}
+
+/// The JavaScript that runs the WebAssembly decoder: `wasm_decoder.js` and the function that the
+/// boot code calls, with the lengths and addresses as numbers
+pub(crate) fn wasm_glue(module: &wasm_decoder::WasmDecoder, encoded_len: usize, decoded_len: usize, decoder: Decoder) -> String {
+    let code = include_str!("js_source/wasm_decoder.js").to_owned()
+        + match decoder {
+            Decoder::Serial => include_str!("js_source/wasm_decompress.js"),
+            Decoder::Sliced => include_str!("js_source/wasm_sliced.js"),
+            Decoder::Worker => include_str!("js_source/wasm_worker.js"),
+        };
+    code.replace("WASM_ENCODED_LEN", &encoded_len.to_string())
+        .replace("WASM_DECODED_LEN", &decoded_len.to_string())
+        .replace("WASM_INPUT", &module.input.to_string())
+        .replace("WASM_OUTPUT", &module.output.to_string())
+}
+
+/// `code` with the string "@@WASM@@" of the glue replaced by the bytes of the module
+pub(crate) fn insert_wasm(code: &str, bytes: &[u8]) -> Result<String> {
+    for quoted in ["\"@@WASM@@\"", "'@@WASM@@'", "`@@WASM@@`"] {
+        if code.matches(quoted).count() == 1 {
+            return Ok(code.replacen(quoted, &js_string_literal(bytes), 1));
+        }
+    }
+    bail!("The boot code has no place for the WebAssembly decoder")
+}
+
+/// A JavaScript string literal of the characters with the codes of `bytes`. The boot code is UTF-8,
+/// so the bytes from 128 on take two bytes before deflate.
+fn js_string_literal(bytes: &[u8]) -> String {
+    let mut literal = String::from("\"");
+    for &b in bytes {
+        match b {
+            b'"' => literal += "\\\"",
+            b'\\' => literal += "\\\\",
+            b'\n' => literal += "\\n",
+            b'\r' => literal += "\\r",
+            _ => literal.push(b as char),
+        }
+    }
+    literal.push('"');
+    literal
 }
 
 /// The HTML that inflates and runs the boot code of `deflated_len` bytes

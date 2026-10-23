@@ -32,6 +32,7 @@ use crate::compressor::search::{
 use output_generator::{
     render_output, BundledFile, Decoder, Loader, OutputGenerationOptions, WebLayout,
 };
+use wasm_decoder::WasmOptions;
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -122,6 +123,11 @@ pub struct Args {
     /// How the web output decodes. By default `sliced` with a loader script, otherwise `serial`
     #[arg(long, value_enum, value_name = "DECODER")]
     pub decoder: Option<Decoder>,
+
+    /// Decode with a WebAssembly decoder generated for the model config, which decodes several
+    /// times as fast as the JavaScript one but takes more bytes. Works with every --decoder
+    #[arg(long)]
+    pub wasm_decoder: bool,
 
     /// Title of the web page, set before the web output decompresses
     #[arg(long, value_name = "TEXT")]
@@ -591,6 +597,9 @@ pub fn run(args: Args) -> Result<()> {
         if args.config.is_some() || profile_64k || args.wants_report() {
             bail!("--brotli cannot be combined with --config, a 64k --size-profile, or --report");
         }
+        if args.wasm_decoder {
+            bail!("--wasm-decoder cannot be combined with --brotli, which needs no decoder");
+        }
         println!("Packing {} source bytes with Brotli", source_len);
         return output_generator::render_brotli_output(
             Path::new(&args.output_directory),
@@ -761,6 +770,7 @@ pub fn run(args: Args) -> Result<()> {
                 marker: runs.marker,
                 lengths: runs.decoded.iter().map(Vec::len).collect(),
             }),
+            wasm: args.wasm_decoder.then(WasmOptions::default),
         },
         size_before_compression,
         encoded_data,

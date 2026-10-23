@@ -8,7 +8,11 @@
 // The decoder runs in a web worker, made from the source text of this function
 let w = new Worker(URL.createObjectURL(new Blob(["(" + (() => {
 {{{decompressor_source}}}
+{{#if wasm}}
+onmessage = e => decompressWorker(e.data);
+{{else}}
 onmessage = e => decompressWorker(model, e.data, {{{encoded_len}}}, {{{decoded_len}}});
+{{/if}}
 }) + ")()"])));
 {{else}}
 {{{decompressor_source}}}
@@ -39,7 +43,13 @@ p.slice(o).arrayBuffer().then(b => {
 {{else}}
     // Decode after the loader has been painted: a requestAnimationFrame callback runs before the paint, the timeout after it
     requestAnimationFrame(() => setTimeout(() =>
+{{#if wasm}}
 {{#if sliced}}
+        decompressSliced(a, run)
+{{else}}
+        decompress(a).then(run)
+{{/if}}
+{{else if sliced}}
         decompressSliced(model, a, {{{encoded_len}}}, {{{decoded_len}}}, run)
 {{else}}
         run(decompress(model, a, {{{encoded_len}}}, {{{decoded_len}}}))
@@ -59,7 +69,14 @@ p.slice(o).arrayBuffer().then(b => {
 {{else if sliced}}
     // The sliced decoder reports progress to rsqz.progress
     rsqz = {};
+{{#if wasm}}
+    return new Promise(r => decompressSliced(a, r));
+{{else}}
     return new Promise(r => decompressSliced(model, a, {{{encoded_len}}}, {{{decoded_len}}}, r));
+{{/if}}
+}).then(d => {
+{{else if wasm}}
+    return decompress(a);
 }).then(d => {
 {{else}}
     d = decompress(model, a, {{{encoded_len}}}, {{{decoded_len}}});
