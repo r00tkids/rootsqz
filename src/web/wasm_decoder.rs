@@ -448,7 +448,8 @@ impl<'a> Gen<'a> {
             })
             .sum::<u32>()
             + context as u32;
-        let inputs = self.mem.alloc(8 * n_inputs as u64);
+        // One more, as SIMD takes the inputs in pairs
+        let inputs = self.mem.alloc(8 * n_inputs as u64 + 8);
         // The state of each model for the selectors and APMs
         let states = self.mem.alloc(4 * self.leaves.len() as u64);
 
@@ -660,7 +661,9 @@ impl<'a> Gen<'a> {
             ("LN2", f64c(std::f64::consts::LN_2)),
         ];
         let fill = |s: &str| -> String {
-            let mut s = s.replace("{CM_STATE}", if context { CM_STATE } else { "" }).replace("{MM_INPUT}", if context { MM_INPUT } else { "" });
+            let simd = self.options.simd;
+            let mut s = s.replace("{STRETCHES}", if simd { STRETCHES_SIMD } else { STRETCHES })
+                .replace("{CM_STATE}", if context { CM_STATE } else { "" }).replace("{MM_INPUT}", if context { MM_INPUT } else { "" });
             for (name, value) in &consts {
                 s = s.replace(&format!("{{{name}}}"), value);
             }
@@ -704,6 +707,11 @@ impl<'a> Gen<'a> {
 
         // The core: coder, stretch and squash, memory fills
         funcs += &fill(CORE);
+        if self.options.simd {
+            funcs += &fill(CORE_SIMD);
+        } else {
+            funcs += &fill(CORE_SCALAR);
+        }
         if n_cm > 0 {
             funcs += &fill(COUNTERS);
             let mut table = String::new();
@@ -944,6 +952,8 @@ impl<'a> Gen<'a> {
         ensure!(k > 0, "A ContextMixer needs a selector");
         let mut f = String::new();
         let n8 = 8 * n_inputs;
+        // With SIMD, the weights are taken in pairs, and the inputs end with a 0 for an odd number
+        let n8 = if self.options.simd { (n8 + 15) & !15 } else { n8 };
         let set_size = 8 + n8;
         let state = |m: usize| format!("(i32.load (i32.const {}))", states + 4 * m as u32);
 
@@ -979,9 +989,9 @@ impl<'a> Gen<'a> {
         )?;
 
         // Predict
-        let mut p = String::from("(func $p (result f64) (local $i i32) (local $x f64) (local $known i32) (local $st f64) (local $b f64)\n");
+        let mut p = String::from("(func $p (result f64) (local $i i32) (local $x f64) (local $known i32) (local $st f64) (local $b f64) (local $v v128) (local $u v128)\n");
         for s in 0..k {
-            write!(p, "(local $s{s} f64)")?;
+            write!(p, "(local $s{s} f64) (local $p{s} i32)")?;
         }
         p += predict;
         p += "\n";
@@ -1097,17 +1107,26 @@ impl<'a> Gen<'a> {
         f += &p;
 
         // Learn
-        let mut l = String::from("(func $l (param $bit i32) (local $i i32) (local $x f64) (local $fb f64) (local $n i32)\n");
+        let mut l = String::from("(func $l (param $bit i32) (local $i i32) (local $x f64) (local $fb f64) (local $n i32) (local $v v128) (local $u v128)\n");
         for s in 0..k {
-            write!(l, "(local $e{s} f64)")?;
+            write!(l, "(local $e{s} f64) (local $p{s} i32) (local $v{s} v128)")?;
         }
         l += "(local.set $fb (f64.convert_i32_u (local.get $bit)))\n";
+        // The squashed dot products, two at once with SIMD
+        for s in 0..k {
+            if self.options.simd && s % 2 == 0 && s + 1 < k {
+                write!(l, "(local.set $v (call $squash2 (f64x2.replace_lane 1 (f64x2.splat (global.get $d{s})) (global.get $d{}))))
+(local.set $e{s} (f64x2.extract_lane 0 (local.get $v))) (local.set $e{} (f64x2.extract_lane 1 (local.get $v)))\n", s + 1, s + 1)?;
+            } else if !(self.options.simd && s % 2 == 1) {
+                write!(l, "(local.set $e{s} (call $squash (global.get $d{s})))\n")?;
+            }
+        }
         for s in 0..k {
             // err = (bit - squash(dot)) * (lr * (1 + lrBoost * 16 / (16 + count)))
             write!(
                 l,
                 "(i32.store (global.get $w{s}) (i32.add (local.tee $n (i32.load (global.get $w{s}))) (i32.const 1)))
-(local.set $e{s} (f64.mul (f64.sub (local.get $fb) (call $squash (global.get $d{s}))) (f64.mul {lr} (f64.add (f64.const 1) (f64.div {boost} (f64.add (f64.const 16) (f64.convert_i32_u (local.get $n))))))))\n",
+(local.set $e{s} (f64.mul (f64.sub (local.get $fb) (local.get $e{s})) (f64.mul {lr} (f64.add (f64.const 1) (f64.div {boost} (f64.add (f64.const 16) (f64.convert_i32_u (local.get $n))))))))\n",
                 lr = f64c(learning_rate),
                 boost = if lr_boost * 16. == 0. { "(f64.const 0)".to_owned() } else { f64c(lr_boost * 16.) },
             )?;
@@ -1148,14 +1167,28 @@ impl<'a> Gen<'a> {
     fn dot_products(&self, k: usize, inputs: u32, n8: u32) -> String {
         let mut c = String::new();
         for s in 0..k {
-            write!(c, "(local.set $s{s} (f64.const 0))").unwrap();
+            write!(c, "(local.set $s{s} (f64.const 0)) (local.set $p{s} (global.get $w{s}))").unwrap();
+        }
+        if self.options.simd {
+            // The products of two inputs at once, added one after the other. A 0 input at the end
+            // adds nothing: a sum from +0 is never -0.
+            write!(c, "(local.set $i (i32.const 0))\n(loop $dot\n(local.set $v (v128.load offset={inputs} (local.get $i)))\n").unwrap();
+            for s in 0..k {
+                write!(
+                    c,
+                    "(local.set $s{s} (f64.add (f64.add (local.get $s{s}) (f64x2.extract_lane 0 (local.tee $u (f64x2.mul (v128.load offset=8 (i32.add (local.get $p{s}) (local.get $i))) (local.get $v))))) (f64x2.extract_lane 1 (local.get $u))))\n"
+                )
+                .unwrap();
+            }
+            write!(c, "(br_if $dot (i32.ne (local.tee $i (i32.add (local.get $i) (i32.const 16))) (i32.const {n8}))))\n").unwrap();
+            return c;
         }
         c += "(local.set $i (i32.const 0))\n(loop $dot\n(local.set $x (f64.load offset=";
         write!(c, "{inputs} (local.get $i)))\n").unwrap();
         for s in 0..k {
             write!(
                 c,
-                "(local.set $s{s} (f64.add (local.get $s{s}) (f64.mul (f64.load offset=8 (i32.add (global.get $w{s}) (local.get $i))) (local.get $x))))\n"
+                "(local.set $s{s} (f64.add (local.get $s{s}) (f64.mul (f64.load offset=8 (i32.add (local.get $p{s}) (local.get $i))) (local.get $x))))\n"
             )
             .unwrap();
         }
@@ -1169,12 +1202,32 @@ impl<'a> Gen<'a> {
 
     /// Code that adds the errors $e0.. times the inputs to the weight sets $w0..
     fn weight_updates(&self, k: usize, inputs: u32, n8: u32) -> String {
-        let mut c = String::from("(local.set $i (i32.const 0))\n(loop $update\n");
+        let mut c = String::new();
+        for s in 0..k {
+            write!(c, "(local.set $p{s} (global.get $w{s}))").unwrap();
+        }
+        if self.options.simd {
+            // Two weights at once
+            for s in 0..k {
+                write!(c, "(local.set $v{s} (f64x2.splat (local.get $e{s})))").unwrap();
+            }
+            write!(c, "(local.set $i (i32.const 0))\n(loop $update\n(local.set $v (v128.load offset={inputs} (local.get $i)))\n").unwrap();
+            for s in 0..k {
+                write!(
+                    c,
+                    "(v128.store offset=8 (local.tee $n (i32.add (local.get $p{s}) (local.get $i))) (f64x2.add (v128.load offset=8 (local.get $n)) (f64x2.mul (local.get $v{s}) (local.get $v))))\n"
+                )
+                .unwrap();
+            }
+            write!(c, "(br_if $update (i32.ne (local.tee $i (i32.add (local.get $i) (i32.const 16))) (i32.const {n8}))))\n").unwrap();
+            return c;
+        }
+        c += "(local.set $i (i32.const 0))\n(loop $update\n";
         write!(c, "(local.set $x (f64.load offset={inputs} (local.get $i)))\n").unwrap();
         for s in 0..k {
             write!(
                 c,
-                "(f64.store offset=8 (local.tee $n (i32.add (global.get $w{s}) (local.get $i))) (f64.add (f64.load offset=8 (local.get $n)) (f64.mul (local.get $e{s}) (local.get $x))))\n"
+                "(f64.store offset=8 (local.tee $n (i32.add (local.get $p{s}) (local.get $i))) (f64.add (f64.load offset=8 (local.get $n)) (f64.mul (local.get $e{s}) (local.get $x))))\n"
             )
             .unwrap();
         }
@@ -1233,6 +1286,27 @@ const CORE: &str = r#"
     (br $shift)))
   (local.get $bit))
 
+;; Repeats the first `unit` bytes at `at` until `len` bytes are filled
+(func $rep (param $at i32) (param $unit i32) (param $len i32)
+  (loop $double
+    (if (i32.gt_u (i32.shl (local.get $unit) (i32.const 1)) (local.get $len))
+      (then (memory.copy (i32.add (local.get $at) (local.get $unit)) (local.get $at) (i32.sub (local.get $len) (local.get $unit))) (return)))
+    (memory.copy (i32.add (local.get $at) (local.get $unit)) (local.get $at) (local.get $unit))
+    (local.set $unit (i32.shl (local.get $unit) (i32.const 1)))
+    (br $double)))
+
+;; v / 16777215 for v below 2^24: (v (2^-24 + 2^-48)) (1 + 2^-48) rounds the same for all of them,
+;; and takes two multiplications instead of a division
+(func $u24 (param $v i32) (result f64)
+  (f64.mul (f64.mul (f64.convert_i32_u (local.get $v)) (f64.const 0x1.000001p-24)) (f64.const 0x1.0000000000010p+0)))
+
+;; The hash of the Rust encoder, as hash in utils.js
+(func $hash (param $v i32) (param $shift i32) (result i32)
+  (i32.shr_u (i32.mul (i32.xor (local.get $v) (i32.shr_u (local.get $v) (local.get $shift))) (i32.const 0x9E35A7BD)) (local.get $shift)))
+"#;
+
+/// Stretch and squash, one value at a time
+const CORE_SCALAR: &str = r#"
 ;; ln(p / (1 - p)), as probStretch: with x = p / (1 - p) = m 2^e and m in [1, 2], e ln 2 + the
 ;; series of 2 atanh((m - 1) / (m + 1)). probStretch halves or doubles x until it is in [1, 2],
 ;; which is exact, as is taking the exponent from the bits; x = 2^e for e > 0 stays at 2.
@@ -1267,18 +1341,45 @@ const CORE: &str = r#"
     (br_if $square (f64.lt (local.tee $i (f64.add (local.get $i) (f64.const 1))) (f64.const 10))))
   (f64.div (f64.const 1) (f64.add (f64.const 1) (local.get $r))))
 
-;; Repeats the first `unit` bytes at `at` until `len` bytes are filled
-(func $rep (param $at i32) (param $unit i32) (param $len i32)
-  (loop $double
-    (if (i32.gt_u (i32.shl (local.get $unit) (i32.const 1)) (local.get $len))
-      (then (memory.copy (i32.add (local.get $at) (local.get $unit)) (local.get $at) (i32.sub (local.get $len) (local.get $unit))) (return)))
-    (memory.copy (i32.add (local.get $at) (local.get $unit)) (local.get $at) (local.get $unit))
-    (local.set $unit (i32.shl (local.get $unit) (i32.const 1)))
-    (br $double)))
+"#;
 
-;; The hash of the Rust encoder, as hash in utils.js
-(func $hash (param $v i32) (param $shift i32) (result i32)
-  (i32.shr_u (i32.mul (i32.xor (local.get $v) (i32.shr_u (local.get $v) (local.get $shift))) (i32.const 0x9E35A7BD)) (local.get $shift)))
+/// Stretch and squash of two values at once, as $stretch and $squash, whose operations they do in
+/// both lanes; with SIMD, $stretch and $squash use them too
+const CORE_SIMD: &str = r#"
+(func $stretch2 (param $p v128) (result v128) (local $x v128) (local $e v128) (local $s v128) (local $t v128) (local $r v128) (local $m v128) (local $i f64)
+  (local.set $x (f64x2.div (local.tee $p (f64x2.max (f64x2.splat {EPS}) (f64x2.min (f64x2.splat {EPS1}) (local.get $p))))
+    (f64x2.sub (f64x2.splat (f64.const 1)) (local.get $p))))
+  ;; x = m 2^e: the biased exponent, and x times 2^-e
+  (local.set $e (i64x2.shr_u (local.get $x) (i32.const 52)))
+  (local.set $x (f64x2.mul (local.get $x) (i64x2.shl (i64x2.sub (i64x2.splat (i64.const 2046)) (local.get $e)) (i32.const 52))))
+  (local.set $e (i64x2.sub (local.get $e) (i64x2.splat (i64.const 1023))))
+  ;; x = 2^e for e > 0 stays at 2
+  (local.set $m (v128.and (f64x2.eq (local.get $x) (f64x2.splat (f64.const 1))) (i64x2.gt_s (local.get $e) (v128.const i64x2 0 0))))
+  (local.set $x (v128.bitselect (f64x2.splat (f64.const 2)) (local.get $x) (local.get $m)))
+  (local.set $e (i64x2.add (local.get $e) (local.get $m)))
+  ;; The first term is t / 1 = t
+  (local.set $r (local.tee $t (f64x2.add (local.tee $s (f64x2.div (f64x2.sub (local.get $x) (f64x2.splat (f64.const 1))) (f64x2.add (local.get $x) (f64x2.splat (f64.const 1))))) (local.get $s))))
+  (local.set $t (f64x2.mul (local.get $t) (local.tee $s (f64x2.mul (local.get $s) (local.get $s)))))
+  (local.set $i (f64.const 3))
+  (loop $term
+    (local.set $r (f64x2.add (local.get $r) (f64x2.div (local.get $t) (f64x2.splat (local.get $i)))))
+    (local.set $t (f64x2.mul (local.get $t) (local.get $s)))
+    (br_if $term (f64.lt (local.tee $i (f64.add (local.get $i) (f64.const 2))) (f64.const 24))))
+  (f64x2.add (local.get $r) (f64x2.mul (f64x2.convert_low_i32x4_s (i8x16.shuffle 0 1 2 3 8 9 10 11 0 1 2 3 0 1 2 3 (local.get $e) (local.get $e))) (f64x2.splat {LN2}))))
+(func $squash2 (param $p v128) (result v128) (local $t v128) (local $r v128) (local $i f64)
+  ;; The first term is 1 (p / 1) = p
+  (local.set $r (f64x2.add (f64x2.splat (f64.const 1)) (local.tee $t (local.tee $p (f64x2.div (f64x2.neg (local.get $p)) (f64x2.splat (f64.const 1024)))))))
+  (local.set $i (f64.const 2))
+  (loop $term
+    (local.set $r (f64x2.add (local.get $r) (local.tee $t (f64x2.mul (local.get $t) (f64x2.div (local.get $p) (f64x2.splat (local.get $i)))))))
+    (br_if $term (f64.lt (local.tee $i (f64.add (local.get $i) (f64.const 1))) (f64.const 14))))
+  (local.set $i (f64.const 0))
+  (loop $square
+    (local.set $r (f64x2.mul (local.get $r) (local.get $r)))
+    (br_if $square (f64.lt (local.tee $i (f64.add (local.get $i) (f64.const 1))) (f64.const 10))))
+  (f64x2.div (f64x2.splat (f64.const 1)) (f64x2.add (f64x2.splat (f64.const 1)) (local.get $r))))
+(func $stretch (param $p f64) (result f64) (f64x2.extract_lane 0 (call $stretch2 (f64x2.splat (local.get $p)))))
+(func $squash (param $p f64) (result f64) (f64x2.extract_lane 0 (call $squash2 (f64x2.splat (local.get $p)))))
 "#;
 
 /// The context models of the shared counters, as counters.js. A model is a record of CM_SIZE bytes:
@@ -1314,12 +1415,43 @@ const COUNTERS: &str = r#"
   (local.set $count (i32.shr_u (local.tee $v (i32.load (local.get $at))) (i32.const 24)))
   (local.set $count (i32.add (local.get $count) (i32.lt_u (local.get $count) (local.get $max))))
   (i32.store (local.get $at) (i32.or (i32.and (i32.add (local.tee $v (i32.and (local.get $v) (i32.const 0xffffff)))
-    (i32.trunc_f64_s (f64.mul {U24F} (f64.div (f64.sub (f64.convert_i32_u (local.get $bit)) (f64.div (f64.convert_i32_u (local.get $v)) {U24F}))
+    (i32.trunc_f64_s (f64.mul {U24F} (f64.div (f64.sub (f64.convert_i32_u (local.get $bit)) (call $u24 (local.get $v)))
       (f64.add (f64.convert_i32_u (local.get $count)) {OFFSET})))))
     (i32.const 0xffffff)) (i32.shl (local.get $count) (i32.const 24)))))
 
 ;; The inputs of all context models, as CounterModel.p
-(func $cm_p (local $r i32) (local $bc i32) (local $e i32) (local $k i32) (local $c i32) (local $slot i32) (local $info i32) (local $w i32) (local $in i32) (local $p f64) (local $count i32) (local $sh i32)
+(func $cm_p (local $v v128) (local $r i32) (local $bc i32) (local $e i32) (local $k i32) (local $c i32) (local $slot i32) (local $info i32) (local $w i32) (local $in i32) (local $p f64) (local $count i32)
+  ;; First the slot of each model in turn, without branches, so that their memory loads overlap.
+  ;; The model takes the counter, slot info and state counter as it finds them, before the next
+  ;; model may take the slot over.
+  (local.set $r (i32.const {CM0}))
+  (loop $slot
+    (if (i32.load offset=4 (local.get $r)) (then
+      (local.set $bc (i32.load offset=28 (local.get $r)))
+      (local.set $e (i32.load offset=24 (local.get $r)))
+      ;; The key: the context and the bits so far, or for a WasmContext, while they are those of
+      ;; the expected byte, their number and the next expected bit
+      (local.set $k (i32.xor (i32.load (local.get $r))
+        (if (result i32) (i32.eq (i32.shr_u (local.get $e) (i32.sub (i32.const 8) (global.get $bits))) (local.get $bc))
+          (then (i32.or (i32.or (i32.const 256) (i32.shl (global.get $bits) (i32.const 1)))
+            (i32.and (i32.shr_u (local.get $e) (i32.sub (i32.const 7) (global.get $bits))) (i32.const 1))))
+          (else (local.get $bc)))))
+      (local.set $c (i32.or (i32.shr_u (i32.mul (local.get $k) (i32.const 0x2545F491)) (i32.const 20)) (i32.const 1)))
+      (i32.store offset=8 (local.get $r) (local.tee $slot (i32.add (i32.const {COUNTERS}) (i32.shl (i32.shr_u (i32.mul (i32.xor (local.get $k) (i32.shr_u (local.get $k) (i32.const 15))) (i32.const 0x2C1B3C6D)) (i32.const {SHIFT})) (i32.const 3)))))
+      ;; A key with another check takes the slot over
+      (local.set $k (i32.ne (i32.shr_u (local.tee $info (i32.load offset=4 (local.get $slot))) (i32.const 20)) (local.get $c)))
+      (i32.store (local.get $slot) (local.tee $w (select (i32.const 0x7fffff) (i32.load (local.get $slot)) (local.get $k))))
+      (i32.store offset=4 (local.get $slot) (local.tee $info (select (i32.shl (local.get $c) (i32.const 20)) (local.get $info) (local.get $k))))
+      (i32.store offset=88 (local.get $r) (local.get $w))
+      ;; The run of the byte, kept in the slot of its first bit
+      (if (i32.lt_u (local.get $bc) (i32.const 2)) (then
+        (i32.store offset=16 (local.get $r) (local.get $slot))
+        (i32.store offset=20 (local.get $r) (local.get $info))))
+      (i32.store offset=12 (local.get $r) (local.tee $c (i32.add (i32.load offset=44 (local.get $r))
+        (i32.shl (i32.or (i32.shl (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 255)) (i32.const 8)) (local.get $bc)) (i32.const 2)))))
+      (i32.store offset=92 (local.get $r) (i32.load (local.get $c)))))
+    (br_if $slot (i32.ne (local.tee $r (i32.add (local.get $r) (i32.const 128))) (i32.const {CMEND}))))
+  ;; Then the inputs
   (local.set $r (i32.const {CM0}))
   (loop $model
     (local.set $in (i32.load offset=32 (local.get $r)))
@@ -1327,33 +1459,9 @@ const COUNTERS: &str = r#"
     (if (i32.load offset=4 (local.get $r))
       (then
         (local.set $bc (i32.load offset=28 (local.get $r)))
-        (local.set $e (i32.load offset=24 (local.get $r)))
-        ;; The key: the context and the bits so far, or for a WasmContext, while they are those of
-        ;; the expected byte, their number and the next expected bit
-        (local.set $k (i32.xor (i32.load (local.get $r))
-          (if (result i32) (i32.eq (i32.shr_u (local.get $e) (i32.sub (i32.const 8) (global.get $bits))) (local.get $bc))
-            (then (i32.or (i32.or (i32.const 256) (i32.shl (global.get $bits) (i32.const 1)))
-              (i32.and (i32.shr_u (local.get $e) (i32.sub (i32.const 7) (global.get $bits))) (i32.const 1))))
-            (else (local.get $bc)))))
-        (local.set $c (i32.or (i32.shr_u (i32.mul (local.get $k) (i32.const 0x2545F491)) (i32.const 20)) (i32.const 1)))
-        (local.set $slot (i32.add (i32.const {COUNTERS}) (i32.shl (i32.shr_u (i32.mul (i32.xor (local.get $k) (i32.shr_u (local.get $k) (i32.const 15))) (i32.const 0x2C1B3C6D)) (i32.const {SHIFT})) (i32.const 3))))
-        ;; A key with another check takes the slot over
-        (if (i32.ne (i32.shr_u (i32.load offset=4 (local.get $slot)) (i32.const 20)) (local.get $c))
-          (then
-            (i32.store (local.get $slot) (i32.const 0x7fffff))
-            (i32.store offset=4 (local.get $slot) (i32.shl (local.get $c) (i32.const 20)))))
-        (local.set $info (i32.load offset=4 (local.get $slot)))
-        ;; The run of the byte, kept in the slot of its first bit
-        (if (i32.lt_u (local.get $bc) (i32.const 2)) (then
-          (i32.store offset=16 (local.get $r) (local.get $slot))
-          (i32.store offset=20 (local.get $r) (local.get $info))))
-        (i32.store offset=8 (local.get $r) (local.get $slot))
-        (i32.store offset=12 (local.get $r) (local.tee $c (i32.add (i32.load offset=44 (local.get $r))
-          (i32.shl (i32.or (i32.shl (i32.and (i32.shr_u (local.get $info) (i32.const 8)) (i32.const 255)) (i32.const 8)) (local.get $bc)) (i32.const 2)))))
-        (local.set $p (f64.div (f64.convert_i32_u (i32.and (local.tee $w (i32.load (local.get $slot))) (i32.const 0xffffff))) {U24F}))
-        (f64.store (local.get $in) (f64.mul (call $stretch (local.get $p)) {IN0}))
+        (local.set $p (call $u24 (i32.and (local.tee $w (i32.load offset=88 (local.get $r))) (i32.const 0xffffff))))
+        {STRETCHES}
         (f64.store offset=8 (local.get $in) (f64.mul (f64.sub (local.get $p) (f64.const 0.5)) {IN1}))
-        (f64.store offset=16 (local.get $in) (f64.mul (call $stretch (f64.div (f64.convert_i32_u (i32.and (i32.load (local.get $c)) (i32.const 0xffffff))) {U24F})) {IN2}))
         (local.set $info (i32.load offset=20 (local.get $r)))
         (f64.store offset=24 (local.get $in)
           (if (result f64) (i32.and
@@ -1409,6 +1517,14 @@ const COUNTERS: &str = r#"
     (i32.store offset=28 (local.get $r) (local.get $bc))
     (br_if $model (i32.ne (local.tee $r (i32.add (local.get $r) (i32.const 128))) (i32.const {CMEND})))))
 "#;
+
+/// The first and third input of a context model: the stretched probabilities of its counter and
+/// of the state counter of its bit history, scaled
+const STRETCHES: &str = "(f64.store (local.get $in) (f64.mul (call $stretch (local.get $p)) {IN0}))
+        (f64.store offset=16 (local.get $in) (f64.mul (call $stretch (call $u24 (i32.and (i32.load offset=92 (local.get $r)) (i32.const 0xffffff)))) {IN2}))";
+const STRETCHES_SIMD: &str = "(local.set $v (call $stretch2 (f64x2.replace_lane 1 (f64x2.splat (local.get $p)) (call $u24 (i32.and (i32.load offset=92 (local.get $r)) (i32.const 0xffffff))))))
+        (f64.store (local.get $in) (f64.mul (f64x2.extract_lane 0 (local.get $v)) {IN0}))
+        (f64.store offset=16 (local.get $in) (f64.mul (f64x2.extract_lane 1 (local.get $v)) {IN2}))";
 
 /// The state of a context model for a ContextMixer: the count of its counter, or 0
 const CM_STATE: &str = "(i32.store (i32.load offset=52 (local.get $r)) (local.get $count))";

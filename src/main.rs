@@ -272,6 +272,7 @@ mod node_tests {
         ] {
             // The WebAssembly decoder too
             crate::web::wasm_decoder::tests::check_predictions(name, &config, input, &layout, false);
+            crate::web::wasm_decoder::tests::check_predictions(&format!("{name}_simd"), &config, input, &layout, true);
             let mut model = config.create_model_for(&layout).unwrap();
             let mut expected = Vec::new();
             for byte in input {
