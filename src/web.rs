@@ -426,6 +426,7 @@ pub fn read_demo(js_main: &str, files: &[String]) -> Result<Demo> {
             // A guess, made better by `estimate_encoded_len`
             encoded_len: stream.len() / 6,
             files: layout_files,
+            wasm: None,
         },
         stream,
     })
@@ -499,6 +500,7 @@ fn choose_record_ranges(
 /// The config that `search` finds for the input of `args`, or the one kept in --search-cache.
 fn search_config(args: &Args, start: CompressConfig, start_json: &str) -> Result<CompressConfig> {
     let mut demo = read_demo(&args.js_main, &args.files)?;
+    demo.layout.wasm = args.wasm_decoder.then(WasmOptions::default);
     demo.layout.stream = choose_layout(&start, &demo)?;
     // FNV-1a over the parts and their lengths, which unlike std's hashers is the same in every
     // build of rootsqz
@@ -511,8 +513,10 @@ fn search_config(args: &Args, start: CompressConfig, start_json: &str) -> Result
         &file_lens,
         &demo.stream,
     ];
-    for part in parts {
-        for &byte in (part.len() as u64).to_le_bytes().iter().chain(part) {
+    // The WebAssembly decoder weighs configs differently; without it, the hash stays as before
+    let wasm: &[&[u8]] = if args.wasm_decoder { &[b"wasm-decoder"] } else { &[] };
+    for part in parts.iter().chain(wasm) {
+        for &byte in (part.len() as u64).to_le_bytes().iter().chain(*part) {
             hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
         }
     }
@@ -671,7 +675,8 @@ pub fn run(args: Args) -> Result<()> {
 
     // The WebAssembly modules and the records among the files get their own models, if they pay
     // for their decoder
-    let demo = read_demo(&args.js_main, &args.files)?;
+    let mut demo = read_demo(&args.js_main, &args.files)?;
+    demo.layout.wasm = args.wasm_decoder.then(WasmOptions::default);
     let layout = choose_layout(&model_config, &demo)?;
     drop(demo);
     let packed_model = model_config.with_stream_models(&layout);
@@ -875,6 +880,11 @@ pub struct SearchArgs {
     #[arg(long, value_name = "FILE")]
     pub state: Option<PathBuf>,
 
+    /// Weigh the configs with the size of the WebAssembly decoder of --wasm-decoder instead of
+    /// the JavaScript decoder
+    #[arg(long)]
+    pub wasm_decoder: bool,
+
     /// Only print the size of the web output of each input with the start config
     #[arg(long)]
     pub eval: bool,
@@ -895,6 +905,7 @@ pub fn run_search(args: SearchArgs) -> Result<()> {
     for files in &args.inputs {
         let files: Vec<String> = files.split(',').map(str::to_owned).collect();
         let mut demo = read_demo(&files[0], &files[1..])?;
+        demo.layout.wasm = args.wasm_decoder.then(WasmOptions::default);
         demo.layout.stream = choose_layout(&start, &demo)?;
         demo.layout.encoded_len = stream_size(&start, &demo)?;
         demos.push(demo);

@@ -611,44 +611,16 @@ pub fn render_output(
 
     // The node output decodes in one go
     let decoder = if target == Target::Node { Decoder::Serial } else { decoder };
-    let (decompression_code, wasm_bytes) = match wasm {
-        Some(options) => {
-            let module = wasm_decoder::generate(
-                &model_config,
-                &static_model_params,
-                &layout,
-                encoded_data.len(),
-                size_before_compression,
-                options,
-            )?;
-            info!("WebAssembly decoder: {} bytes", module.bytes.len());
-            // The web output has the module before the boot code, as M; the node output as a string
-            let module_expr = match target {
-                Target::Web => format!("M.slice(0,{})", module.bytes.len()),
-                Target::Node => WASM_STRING.to_owned(),
-            };
-            (
-                wasm_glue(&module, encoded_data.len(), size_before_compression, decoder, &module_expr),
-                Some(module.bytes),
-            )
-        }
-        None => {
-            let mut features_used = ModelRef::None;
-            let mut decompression_code = generate_js_decompression_code(
-                &model_config,
-                &static_model_params,
-                &layout,
-                &mut features_used,
-            );
-            // Only the decoder that the boot code calls is included
-            decompression_code += match decoder {
-                Decoder::Serial => include_str!("js_source/decompress.js"),
-                Decoder::Sliced => include_str!("js_source/coder_sliced.js"),
-                Decoder::Worker => include_str!("js_source/coder_worker.js"),
-            };
-            (decompression_code, None)
-        }
-    };
+    let (decompression_code, wasm_bytes) = decoder_code(
+        &model_config,
+        &static_model_params,
+        &layout,
+        encoded_data.len(),
+        size_before_compression,
+        decoder,
+        &target,
+        wasm,
+    )?;
 
     Ok(match target {
         Target::Web => {
@@ -945,24 +917,28 @@ pub struct WebLayout {
     pub encoded_len: usize,
     /// The files of the stream: name, start and length
     pub files: Vec<(String, u32, u32)>,
+    /// The options of the WebAssembly decoder, if the output decodes with it (--wasm-decoder)
+    pub wasm: Option<WasmOptions>,
 }
 
 /// Bytes of the web output that are not the compressed stream, with the serial decoder and no
-/// loader: the HTML header and the deflated boot code, whose decoder `model_config` makes.
-/// Used to weigh a config in the search.
+/// loader: the HTML header and the deflated boot code, whose decoder `model_config` makes, in
+/// WebAssembly if `layout.wasm` says so. Used to weigh a config in the search.
 pub fn web_overhead(
     model_config: &ModelConfig,
     static_model_params: &StaticModelParams,
     layout: &WebLayout,
 ) -> Result<usize> {
-    let mut features_used = ModelRef::None;
-    let mut decompression_code = generate_js_decompression_code(
+    let (decompression_code, wasm_bytes) = decoder_code(
         model_config,
         static_model_params,
         &layout.stream,
-        &mut features_used,
-    );
-    decompression_code += include_str!("js_source/decompress.js");
+        layout.encoded_len,
+        layout.decoded_len,
+        Decoder::Serial,
+        &Target::Web,
+        layout.wasm,
+    )?;
     let files_map: Vec<String> = layout
         .files
         .iter()
@@ -977,18 +953,75 @@ pub fn web_overhead(
         None,
         Decoder::Serial,
         None,
-        None,
+        wasm_bytes.as_deref(),
     )?;
-    Ok(html_header(deflated_code.len())?.len() + deflated_code.len())
+    let header = match &wasm_bytes {
+        Some(bytes) => html_header_wasm(deflated_code.len(), bytes.len())?,
+        None => html_header(deflated_code.len())?,
+    };
+    Ok(header.len() + deflated_code.len())
 }
 
-/// The JavaScript that runs the WebAssembly decoder: `wasm_decoder.js` and the function that the
-/// boot code calls, with the lengths and addresses as numbers and `module_expr` for the bytes of
-/// the module
+/// The decoder of the stream that `model_config` makes: the JavaScript that the boot code calls,
+/// and with `wasm`, the bytes of the WebAssembly decoder that this JavaScript runs
+#[allow(clippy::too_many_arguments)]
+fn decoder_code(
+    model_config: &ModelConfig,
+    static_model_params: &StaticModelParams,
+    layout: &StreamLayout,
+    encoded_len: usize,
+    decoded_len: usize,
+    decoder: Decoder,
+    target: &Target,
+    wasm: Option<WasmOptions>,
+) -> Result<(String, Option<Vec<u8>>)> {
+    Ok(match wasm {
+        Some(options) => {
+            let module = wasm_decoder::generate(
+                model_config,
+                static_model_params,
+                layout,
+                encoded_len,
+                decoded_len,
+                options,
+            )?;
+            info!("WebAssembly decoder: {} bytes", module.bytes.len());
+            // The web output has the module before the boot code, as M; the node output as a string
+            let module_expr = match target {
+                Target::Web => format!("M.slice(0,{})", module.bytes.len()),
+                Target::Node => WASM_STRING.to_owned(),
+            };
+            (
+                wasm_glue(&module, encoded_len, decoded_len, decoder, &module_expr),
+                Some(module.bytes),
+            )
+        }
+        None => {
+            let mut features_used = ModelRef::None;
+            let mut decompression_code = generate_js_decompression_code(
+                model_config,
+                static_model_params,
+                layout,
+                &mut features_used,
+            );
+            // Only the decoder that the boot code calls is included
+            decompression_code += match decoder {
+                Decoder::Serial => include_str!("js_source/decompress.js"),
+                Decoder::Sliced => include_str!("js_source/coder_sliced.js"),
+                Decoder::Worker => include_str!("js_source/coder_worker.js"),
+            };
+            (decompression_code, None)
+        }
+    })
+}
+
 /// The expression of the glue for the bytes of the module of the node output, which `insert_wasm`
 /// puts in
 pub(crate) const WASM_STRING: &str = "Uint8Array.from(\"@@WASM@@\", c => c.charCodeAt())";
 
+/// The JavaScript that runs the WebAssembly decoder: `wasm_decoder.js` and the function that the
+/// boot code calls, with the lengths and addresses as numbers and `module_expr` for the bytes of
+/// the module
 pub(crate) fn wasm_glue(
     module: &wasm_decoder::WasmDecoder,
     encoded_len: usize,

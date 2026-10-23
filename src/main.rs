@@ -515,21 +515,29 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
         std::fs::write(&js_path, &input).unwrap();
         let (js, wasm) = (js_path.to_str().unwrap(), "tests/wasm/fixture.wasm");
 
-        let cli = crate::Cli::try_parse_from([
-            "rootsqz", "-j", js, "-f", wasm, "--size-profile", "64k-wasm", "-o",
-            output_dir.to_str().unwrap(),
-        ])
-        .unwrap();
-        crate::web::run(cli.default_args.unwrap()).unwrap();
+        // With the JavaScript decoder and with the WebAssembly decoder
+        for wasm_decoder in [false, true] {
+            let mut args = vec![
+                "rootsqz", "-j", js, "-f", wasm, "--size-profile", "64k-wasm", "-o",
+                output_dir.to_str().unwrap(),
+            ];
+            if wasm_decoder {
+                args.push("--wasm-decoder");
+            }
+            let cli = crate::Cli::try_parse_from(args).unwrap();
+            crate::web::run(cli.default_args.unwrap()).unwrap();
 
-        let config = serde_json::from_str(SIZE_64K_WASM_CONFIG_JSON).unwrap();
-        let mut demo = crate::web::read_demo(js, &[wasm.to_owned()]).unwrap();
-        demo.layout.stream = crate::web::choose_layout(&config, &demo).unwrap();
-        demo.layout.encoded_len = crate::compressor::search::stream_size(&config, &demo).unwrap();
-        assert_eq!(
-            crate::compressor::search::demo_cost(&config, &demo).unwrap() as u64,
-            std::fs::metadata(output_dir.join("index.html")).unwrap().len()
-        );
+            let config = serde_json::from_str(SIZE_64K_WASM_CONFIG_JSON).unwrap();
+            let mut demo = crate::web::read_demo(js, &[wasm.to_owned()]).unwrap();
+            demo.layout.wasm = wasm_decoder.then(Default::default);
+            demo.layout.stream = crate::web::choose_layout(&config, &demo).unwrap();
+            demo.layout.encoded_len = crate::compressor::search::stream_size(&config, &demo).unwrap();
+            assert_eq!(
+                crate::compressor::search::demo_cost(&config, &demo).unwrap() as u64,
+                std::fs::metadata(output_dir.join("index.html")).unwrap().len(),
+                "wasm_decoder: {wasm_decoder}"
+            );
+        }
     }
 
     fn round_trip_with_config(

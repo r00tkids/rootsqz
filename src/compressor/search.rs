@@ -182,7 +182,7 @@ fn overhead_cache() -> &'static Mutex<HashMap<String, usize>> {
 /// Bytes of the web output of `demo` besides the stream: the HTML header and the boot code.
 pub fn overhead(config: &CompressConfig, demo: &Demo) -> Result<usize> {
     let model = config.with_stream_models(&demo.layout.stream);
-    let key = format!("{model:?} {:?} {}", config.static_model_params, demo.name);
+    let key = format!("{model:?} {:?} {} {:?}", config.static_model_params, demo.name, demo.layout.wasm);
     if let Some(size) = overhead_cache().lock().unwrap().get(&key) {
         return Ok(*size);
     }

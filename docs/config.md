@@ -44,6 +44,8 @@ It skips changes after which the decoder would need more than 1 GB of memory, by
 
 With wasm files, it also tries the WebAssembly models of the `64k-wasm` preset if the config has none.
 
+With `--wasm-decoder`, it counts the code of the WebAssembly decoder instead of the JavaScript one, as the models cost different amounts of code in each.
+
 `--search` saves the best config so far as `search_config.json` in the output directory after each improvement, and the state of the search next to it (or in the `--search-cache` directory). Run the same command again to resume a stopped search.
 
 `rootsqz search` searches without building the intro:
@@ -57,3 +59,4 @@ rootsqz search -i main.js,data.bin -o config.json
 - `--state <FILE>` saves the progress. To resume a stopped search, run it again with the same `--state`, and `--config` set to the `-o` file.
 - `--eval` only prints the size of each intro with `--config`, and the memory its decoder needs.
 - `--max-memory-mb` changes the memory limit (default 1000).
+- `--wasm-decoder` finds the config for an intro built with `--wasm-decoder`.

@@ -11,7 +11,7 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
   - `64k`: 55,162 → 56,497 bytes (+1,335), 16.6 s → 2.9 s
   - `64k-fast`: 57,373 → 58,291 bytes (+918), 8.4 s → 1.4 s
 
-  Outputs without it are unchanged.
+  Outputs without it are unchanged. With `--search`, the search counts the size of the WebAssembly decoder, and so does the choice of the record ranges; `rootsqz search` takes `--wasm-decoder` for this.
 
 ## [0.15.0] - 2026-10-22
 
