@@ -8,8 +8,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ### Added
 - `--wasm-decoder` (`wasmDecoder` in the Node API and the plugin) decodes with a WebAssembly decoder instead of the JavaScript one, with any `--decoder`, for the `web` and `node` targets. It is generated from the config like the JavaScript decoder, decodes the same stream 5–6 times as fast, and takes about 1 KB more. On a 64k intro of 225 KB in Chrome, with `--decoder worker`, decoder included:
-  - `64k`: 55,162 → 56,497 bytes (+1,335), 16.6 s → 2.9 s
-  - `64k-fast`: 57,373 → 58,291 bytes (+918), 8.4 s → 1.4 s
+  - `64k`: 55,162 → 56,373 bytes (+1,211), 16.6 s → 2.9 s
+  - `64k-fast`: 57,373 → 58,149 bytes (+776), 8.4 s → 1.5 s
 
   Outputs without it are unchanged. With `--search`, the search counts the size of the WebAssembly decoder, and so does the choice of the record ranges; `rootsqz search` takes `--wasm-decoder` for this.
 
