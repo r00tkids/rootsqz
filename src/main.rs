@@ -918,7 +918,7 @@ mod wasm_decoder_tests {
     use crate::compressor::model_finder::SIZE_64K_FAST_CONFIG_JSON;
     use crate::compressor::Encoder;
     use crate::web::output_generator::{
-        self, insert_wasm, render_output, wasm_glue, Decoder, Loader, OutputGenerationOptions,
+        self, render_output, wasm_glue, Decoder, Loader, OutputGenerationOptions,
     };
     use crate::web::wasm_decoder::{self, WasmOptions};
 
@@ -991,7 +991,7 @@ mod wasm_decoder_tests {
     fs.writeFileSync(dir + "/output.bin", message);
     fs.writeFileSync(dir + "/progress.json", JSON.stringify(progress));
 };
-decompressWorker(input);"#,
+decompressWorker(module, input);"#,
             ),
             (
                 Decoder::Sliced,
@@ -1006,9 +1006,10 @@ decompressSliced(input, output => {
             let dir = Path::new("testout/wasm_glue").join(format!("{decoder:?}"));
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("input.pack"), &encoded).unwrap();
-            let glue = insert_wasm(&wasm_glue(&module, encoded.len(), input.len(), decoder), &module.bytes).unwrap();
+            std::fs::write(dir.join("decoder.wasm"), &module.bytes).unwrap();
+            let glue = wasm_glue(&module, encoded.len(), input.len(), decoder, "module");
             let script = format!(
-                "import fs from 'node:fs';\nlet dir = import.meta.dirname, progress = [];\nlet input = new Uint8Array(fs.readFileSync(dir + '/input.pack'));\n{glue}\n{run}\n"
+                "import fs from 'node:fs';\nlet dir = import.meta.dirname, progress = [];\nlet input = new Uint8Array(fs.readFileSync(dir + '/input.pack'));\nlet module = fs.readFileSync(dir + '/decoder.wasm');\n{glue}\n{run}\n"
             );
             std::fs::write(dir.join("index.mjs"), script).unwrap();
             assert!(Command::new("node").arg(dir.join("index.mjs")).status().unwrap().success());

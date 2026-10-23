@@ -138,11 +138,6 @@ fn hash(value: u32, shift: u32) -> u32 {
     (value ^ value >> shift).wrapping_mul(0x9E35A7BD) >> shift
 }
 
-/// The mix of RecordModel, as in record_model.js
-fn record_mix(h: u32, v: u32) -> u32 {
-    (h ^ v).wrapping_mul(0x9E3779B1).rotate_left(13)
-}
-
 /// The generated module for a model config, with stream models already added
 /// (`CompressConfig::with_stream_models`). `encoded_len` and `decoded_len` are the lengths of
 /// the compressed stream and of the decoded bytes.
@@ -227,8 +222,6 @@ struct Gen<'a> {
     kinds: Vec<Kind>,
     /// Data segments: address and bytes
     data: Vec<(u32, Vec<u8>)>,
-    /// Whether the first WasmContext was given the ranges
-    wasm_ranges_given: bool,
     js_variants: Vec<u32>,
 }
 
@@ -286,7 +279,6 @@ pub(crate) fn generate_text(
         leaves: Vec::new(),
         kinds: Vec::new(),
         data: Vec::new(),
-        wasm_ranges_given: false,
         js_variants: Vec::new(),
     };
     for model in models {
@@ -318,9 +310,9 @@ impl<'a> Gen<'a> {
         Leaf::Context(
             kind,
             if extra.is_empty() {
-                format!("(drop {create})")
+                create
             } else {
-                format!("(local.set $r {create}) {extra}")
+                format!("(local.set $r (global.get $cr)) {create} {extra}")
             },
         )
     }
@@ -360,7 +352,6 @@ impl<'a> Gen<'a> {
             }
             ModelConfig::WasmContext { fields, max_count } => {
                 // The first one runs the parser, on all modules
-                self.wasm_ranges_given = true;
                 self.context(Kind::WasmContext, max_count.unwrap_or(15), *fields, false, "")
             }
             ModelConfig::Record(config) => self.record(config)?,
@@ -398,30 +389,19 @@ impl<'a> Gen<'a> {
     }
 
     fn record(&mut self, config: &RecordConfig) -> Result<Leaf> {
-        let mix = |h: u32, v: i32| record_mix(h, v as u32);
-        let magic = config
-            .dists
-            .iter()
-            .fold(mix(config.delta as u32, config.column as i32), |h, &d| mix(h, d));
-        // The dists, as a count and bytes
+        // The parameters as data: column, delta, the number of dists and the dists
         ensure!(config.dists.len() < 256, "Too many record dists");
-        let mut dists = vec![config.dists.len() as u8];
+        let mut params = vec![config.column as u8, config.delta as i8 as u8, config.dists.len() as u8];
         for &d in &config.dists {
             ensure!((-128..128).contains(&d), "Record dists must be -128 to 127 for the WebAssembly decoder");
-            dists.push(d as i8 as u8);
+            params.push(d as i8 as u8);
         }
-        let at = self.mem.alloc(dists.len() as u64);
-        self.data.push((at, dists));
-        Ok(self.context(
-            Kind::Record,
-            config.max_count.unwrap_or(15),
-            magic,
-            false,
-            &format!(
-                "(call $record_new (local.get $r) (i32.const {}) (i32.const {}) (i32.const {at}))",
-                config.column as u32, config.delta
-            ),
-        ))
+        let at = self.mem.alloc(params.len() as u64);
+        self.data.push((at, params));
+        let max_count = config.max_count.unwrap_or(15);
+        ensure_count(max_count);
+        self.kind_index(Kind::Record);
+        Ok(Leaf::Context(Kind::Record, format!("(call $record_new (i32.const {max_count}) (i32.const {at}))")))
     }
 }
 
@@ -532,14 +512,10 @@ impl<'a> Gen<'a> {
         // Match models: a record of fields each, and their tables
         const MM_SIZE: u32 = 64;
         let mm0 = self.mem.alloc((MM_SIZE * n_match) as u64);
-        let mut mm_tables = Vec::new();
-        for _ in 0..n_match {
-            let head = self.mem.alloc(4 << 22);
-            let chain = self.mem.alloc(4 * (decoded_len as u64 + 2));
-            let probs = self.mem.alloc(4 * (72 << 16));
-            let counts = self.mem.alloc(72 << 16);
-            mm_tables.push((head, chain, probs, counts));
-        }
+        // Their tables, which $mm_new takes in turn: the head, the chain, the probabilities and the
+        // counts
+        let mm_chain = (4 * (decoded_len + 2) + 15) & !15;
+        let mm_region = self.mem.alloc(n_match as u64 * ((4 << 22) + mm_chain as u64 + 5 * (72 << 16)));
         const MP_SIZE: u32 = 48;
         let mp0 = self.mem.alloc((MP_SIZE * n_mp) as u64);
         let mut mp_tables = Vec::new();
@@ -553,8 +529,8 @@ impl<'a> Gen<'a> {
         }
 
         // Create the models in order
-        let (mut mm_i, mut mp_i) = (0, 0);
-        for (m, leaf) in self.leaves.iter().enumerate() {
+        let mut mp_i = 0;
+        for leaf in &self.leaves {
             match leaf {
                 Leaf::Context(_, create) => init += create,
                 Leaf::Match {
@@ -562,14 +538,7 @@ impl<'a> Gen<'a> {
                     candidates,
                     flags,
                 } => {
-                    let (head, chain, probs, counts) = mm_tables[mm_i];
-                    let r = mm0 + MM_SIZE * mm_i as u32;
-                    mm_i += 1;
-                    let _ = m;
-                    write!(
-                        init,
-                        "(call $mm_new (i32.const {r}) (i32.const {min_len}) (i32.const {candidates}) (i32.const {flags}) (i32.const {head}) (i32.const {chain}) (i32.const {probs}) (i32.const {counts}))"
-                    )?;
+                    write!(init, "(call $mm_new (i32.const {min_len}) (i32.const {candidates}) (i32.const {flags}))")?;
                 }
                 Leaf::MatchPredictor {
                     context_bytes,
@@ -592,7 +561,9 @@ impl<'a> Gen<'a> {
 
         // APM tables
         let mut apm_tables = Vec::new();
+        let mut apm_probs = (0, 0);
         if let Mix::Context { apms, .. } = mix {
+            let mut sizes = Vec::new();
             for apm in apms.iter() {
                 let contexts: u64 = match apm.ctx {
                     ApmContext::Order0 => 1 << 8,
@@ -603,10 +574,26 @@ impl<'a> Gen<'a> {
                     }
                     ApmContext::State(_) => 1 << 14,
                 };
-                let probs = self.mem.alloc(8 * 17 * contexts);
-                let counts = self.mem.alloc(4 * 17 * contexts);
-                apm_tables.push((probs, counts, 17 * contexts));
+                sizes.push(17 * contexts);
             }
+            // The probabilities of all, one after the other, as they start the same
+            let total: u64 = sizes.iter().sum();
+            let mut probs = self.mem.alloc(8 * total);
+            apm_probs = (probs, 8 * total);
+            for &len in &sizes {
+                apm_tables.push((probs, self.mem.alloc(4 * len), len));
+                probs += 8 * len as u32;
+            }
+        }
+        if apm_probs.1 > 0 {
+            // The buckets start at the probabilities of the stretched -8 to 8
+            let (probs, len) = apm_probs;
+            write!(
+                init,
+                "(local.set $r (i32.const 0)) (loop $bucket (f64.store (i32.add (i32.const {probs}) (i32.shl (local.get $r) (i32.const 3))) (call $squash (f64.convert_i32_s (i32.sub (local.get $r) (i32.const 8)))))
+  (br_if $bucket (i32.ne (local.tee $r (i32.add (local.get $r) (i32.const 1))) (i32.const 17))))
+(call $rep (i32.const {probs}) (i32.const 136) (i32.const {len}))\n"
+            )?;
         }
 
         // Mixer weights: per selector a table of the weight set of each context, which the sets
@@ -689,6 +676,9 @@ impl<'a> Gen<'a> {
                 .replace("{MP0}", &mp0.to_string())
                 .replace("{MPEND}", &(mp0 + MP_SIZE * n_mp).to_string())
                 .replace("{MATCH_STRIDE}", &(8 + 8 * context as u32).to_string())
+                .replace("{T_RECORD}", &self.kinds.iter().position(|&k| k == Kind::Record).unwrap_or(0).to_string())
+                .replace("{MM_CHAIN}", &mm_chain.to_string())
+                .replace("{MM_REGION}", &mm_region.to_string())
                 .replace("{TOKEN_MAX}", &self.params.token_max_position.to_string())
                 .replace("{TOKEN_MASK}", match self.params.token_context_bytes { 0 => "0", 1 => "255", _ => "65535" })
                 .replace("{H1337}", &(hash(1337, 2) as i32).to_string())
@@ -828,7 +818,6 @@ impl<'a> Gen<'a> {
                     &predict,
                     &learn_models,
                     &mut globals,
-                    &mut init,
                 )?;
             }
             Mix::Plain => {
@@ -946,7 +935,6 @@ impl<'a> Gen<'a> {
         predict: &str,
         learn_models: &str,
         globals: &mut String,
-        init: &mut String,
     ) -> Result<String> {
         let k = selectors.len();
         ensure!(k > 0, "A ContextMixer needs a selector");
@@ -1091,18 +1079,9 @@ impl<'a> Gen<'a> {
 (func $q (param f64) (result f64) (call $squash (local.get 0)))
 "#;
             for (j, apm) in apms.iter().enumerate() {
-                let (probs, counts, len) = apm_tables[j];
-                let _ = apm;
-                // The buckets start at the probabilities of the stretched -8 to 8
-                write!(
-                    init,
-                    "(local.set $r (i32.const 0)) (loop $b{j} (f64.store (i32.add (i32.const {probs}) (i32.shl (local.get $r) (i32.const 3))) (call $squash (f64.convert_i32_s (i32.sub (local.get $r) (i32.const 8)))))
-  (br_if $b{j} (i32.ne (local.tee $r (i32.add (local.get $r) (i32.const 1))) (i32.const 17))))
-(call $rep (i32.const {probs}) (i32.const 136) (i32.const {}))\n",
-                    8 * len
-                )?;
-                let _ = counts;
+                let _ = (apm, apm_tables[j]);
             }
+
         }
         f += &p;
 
@@ -1389,7 +1368,7 @@ const CORE_SIMD: &str = r#"
 /// 40 next function, 44 address of its state counters, 48 the xor of the bits it learns (255 xor
 /// the expected byte of a Record), 52 address of its state for the mixer, 56.. its own fields
 const COUNTERS: &str = r#"
-(func $cm (param $next i32) (param $max i32) (param $a i32) (param $act i32) (result i32) (local $r i32)
+(func $cm (param $next i32) (param $max i32) (param $a i32) (param $act i32) (local $r i32)
   (i32.store offset=40 (local.tee $r (global.get $cr)) (local.get $next))
   (i32.store offset=36 (local.get $r) (local.get $max))
   (i32.store offset=56 (local.get $r) (local.get $a))
@@ -1403,8 +1382,7 @@ const COUNTERS: &str = r#"
   (global.set $sp (i32.add (global.get $sp) (i32.const 0x40000)))
   (global.set $ip (i32.add (global.get $ip) (i32.const 40)))
   (global.set $mi (i32.add (global.get $mi) (i32.const 4)))
-  (global.set $cr (i32.add (local.get $r) (i32.const 128)))
-  (local.get $r))
+  (global.set $cr (i32.add (local.get $r) (i32.const 128))))
 
 ;; Math.imul(hash(hi, 3) * 9 + hash(lo, 3) + 1, magic)
 (func $context_hash (param $hi i32) (param $lo i32) (param $magic i32) (result i32)
@@ -1810,23 +1788,33 @@ const NEXT_RECORD: &str = r#"
 ;; Record: the context of the next byte in the record ranges, as next in record_model.js. Fields:
 ;; 56 magic, 60 column, 64 delta, 68 address of the dists, 72 index of the next range, 76 start,
 ;; 80 end and 84 stride of the range. The expected byte is in field 48, as 255 xor it.
-(func $record_new (param $r i32) (param $column i32) (param $delta i32) (param $dists i32)
-  (i32.store offset=60 (local.get $r) (local.get $column))
-  (i32.store offset=64 (local.get $r) (local.get $delta))
-  (i32.store offset=68 (local.get $r) (local.get $dists))
+;; A Record model with the parameters at `at`: column, delta, the number of dists and the dists. Its
+;; hash is the mix of the delta, the column and the dists.
+(func $record_new (param $max i32) (param $at i32) (local $r i32) (local $h i32) (local $i i32)
+  (local.set $h (call $record_mix (i32.load8_s offset=1 (local.get $at)) (i32.load8_u (local.get $at))))
+  (block $done (loop $dist
+    (br_if $done (i32.eq (local.get $i) (i32.load8_u offset=2 (local.get $at))))
+    (local.set $h (call $record_mix (local.get $h) (i32.load8_s offset=3 (i32.add (local.get $at) (local.get $i)))))
+    (local.set $i (i32.add (local.get $i) (i32.const 1)))
+    (br $dist)))
+  (local.set $r (global.get $cr))
+  (call $cm (i32.const {T_RECORD}) (local.get $max) (local.get $h) (i32.const 0))
+  (i32.store offset=60 (local.get $r) (i32.load8_u (local.get $at)))
+  (i32.store offset=64 (local.get $r) (i32.load8_s offset=1 (local.get $at)))
+  (i32.store offset=68 (local.get $r) (i32.add (local.get $at) (i32.const 2)))
   (i32.store offset=72 (local.get $r) (i32.const {RECORDS}))
   (i32.store offset=48 (local.get $r) (i32.const 255))
   (call $next_record (local.get $r) (i32.const 0)))
 (func $next_record (param $r i32) (param $b i32) (local $pos i32) (local $h i32) (local $start i32) (local $stride i32) (local $d i32) (local $n i32)
-  (local $w i64) (local $rec i64) (local $ws i64) (local $k i64) (local $m i64) (local $km i64) (local $a i64) (local $p i64) (local $dd i64) (local $wd i32)
+  (local $w i32) (local $ws i32) (local $k i32) (local $mw i32) (local $mk i32) (local $p i32)
   (local.set $pos (global.get $pos))
   (local.set $h (i32.load offset=56 (local.get $r)))
   ;; The range of the position
   (block $found (loop $range
     (br_if $found (i32.lt_u (local.get $pos) (i32.load offset=80 (local.get $r))))
     (br_if $found (i32.eq (local.tee $d (i32.load offset=72 (local.get $r))) (i32.const {RECORDS_END})))
-    (i32.store offset=76 (local.get $r) (i32.add (i32.load offset=80 (local.get $r)) (i32.shl (i32.load (local.get $d)) (i32.const 9))))
-    (i32.store offset=80 (local.get $r) (i32.add (i32.load offset=76 (local.get $r)) (i32.shl (i32.load offset=4 (local.get $d)) (i32.const 9))))
+    (i32.store offset=76 (local.get $r) (local.tee $n (i32.add (i32.load offset=80 (local.get $r)) (i32.shl (i32.load (local.get $d)) (i32.const 9)))))
+    (i32.store offset=80 (local.get $r) (i32.add (local.get $n) (i32.shl (i32.load offset=4 (local.get $d)) (i32.const 9))))
     (i32.store offset=84 (local.get $r) (i32.load offset=8 (local.get $d)))
     (i32.store offset=72 (local.get $r) (i32.add (local.get $d) (i32.const 12)))
     (br $range)))
@@ -1834,56 +1822,48 @@ const NEXT_RECORD: &str = r#"
   (local.set $stride (i32.load offset=84 (local.get $r)))
   (i32.store offset=4 (local.get $r) (i32.const 0))
   (if (i32.or (i32.lt_u (local.get $pos) (local.get $start)) (i32.ge_u (local.get $pos) (i32.load offset=80 (local.get $r)))) (then (return)))
-  (if (i32.load offset=60 (local.get $r)) (then
-    (local.set $h (call $record_mix (local.get $h) (i32.rem_u (i32.sub (local.get $pos) (local.get $start)) (local.get $stride))))))
+  ;; The position in the record
+  (local.set $k (i32.rem_u (i32.sub (local.get $pos) (local.get $start)) (local.get $stride)))
+  (if (i32.load offset=60 (local.get $r)) (then (local.set $h (call $record_mix (local.get $h) (local.get $k)))))
   ;; The bytes at the dists: bytes back if positive, records back if negative, 256 before the start
   (local.set $n (i32.load8_u (local.tee $d (i32.load offset=68 (local.get $r)))))
   (block $done (loop $dist
     (br_if $done (i32.eqz (local.get $n)))
-    (local.set $d (i32.add (local.get $d) (i32.const 1)))
-    (local.set $wd (i32.load8_s (local.get $d)))
-    (local.set $wd (select (local.get $wd) (i32.mul (i32.sub (i32.const 0) (local.get $wd)) (local.get $stride)) (i32.gt_s (local.get $wd) (i32.const 0))))
+    (local.set $w (select (local.tee $w (i32.load8_s (local.tee $d (i32.add (local.get $d) (i32.const 1))))) (i32.mul (i32.sub (i32.const 0) (local.get $w)) (local.get $stride)) (i32.gt_s (local.get $w) (i32.const 0))))
     (local.set $h (call $record_mix (local.get $h)
-      (select (i32.load8_u offset={OUT} (i32.sub (local.get $pos) (local.get $wd))) (i32.const 256) (i32.le_u (local.get $wd) (local.get $pos)))))
+      (select (i32.load8_u offset={OUT} (i32.sub (local.get $pos) (local.get $w))) (i32.const 256) (i32.le_u (local.get $w) (local.get $pos)))))
     (local.set $n (i32.sub (local.get $n) (i32.const 1)))
     (br $dist)))
   ;; expected = 255, field 48 is 255 xor it
   (i32.store offset=48 (local.get $r) (i32.const 0))
-  (if (local.tee $wd (i32.load offset=64 (local.get $r))) (then
-    ;; The byte that continues the little endian words of |delta| bytes at the same place in the
-    ;; last records: linearly from the last two if delta is positive, as in the last one if negative
-    (local.set $w (i64.extend_i32_u (select (local.get $wd) (i32.sub (i32.const 0) (local.get $wd)) (i32.gt_s (local.get $wd) (i32.const 0)))))
-    (local.set $rec (i64.extend_i32_u (i32.sub (local.get $pos) (i32.rem_u (i32.sub (local.get $pos) (local.get $start)) (local.get $stride)))))
-    (local.set $ws (i64.sub (i64.extend_i32_u (local.get $pos)) (i64.rem_u (i64.sub (i64.extend_i32_u (local.get $pos)) (local.get $rec)) (local.get $w))))
-    (local.set $k (i64.sub (i64.extend_i32_u (local.get $pos)) (local.get $ws)))
+  (if (local.tee $d (i32.load offset=64 (local.get $r))) (then
+    ;; The byte that continues the little endian words of w = |delta| bytes at the same place in the
+    ;; last records: linearly from the last two if delta is positive, as in the last one if
+    ;; negative. Modulo 2^(8 w), all of it is the same in wrapping 32-bit arithmetic.
+    (local.set $w (select (local.get $d) (i32.sub (i32.const 0) (local.get $d)) (i32.gt_s (local.get $d) (i32.const 0))))
+    ;; The start of the word, and k, the bytes of it before the position
+    (local.set $ws (i32.sub (local.get $pos) (local.tee $k (i32.rem_u (local.get $k) (local.get $w)))))
     (if (i32.or
-        (i64.gt_u (i64.add (local.get $ws) (local.get $w)) (i64.add (local.get $rec) (i64.extend_i32_u (local.get $stride))))
-        (i64.lt_u (local.get $ws) (i64.add (i64.extend_i32_u (local.get $start)) (i64.mul (i64.extend_i32_u (local.get $stride)) (i64.extend_i32_u (i32.add (i32.const 1) (i32.gt_s (local.get $wd) (i32.const 0))))))))
+        (i32.gt_u (i32.add (local.get $ws) (local.get $w)) (i32.add (i32.sub (local.get $pos) (i32.rem_u (i32.sub (local.get $pos) (local.get $start)) (local.get $stride))) (local.get $stride)))
+        (i32.lt_u (local.get $ws) (i32.add (local.get $start) (i32.mul (local.get $stride) (i32.add (i32.const 1) (i32.gt_s (local.get $d) (i32.const 0)))))))
       (then (return)))
-    (local.set $m (i64.shl (i64.const 1) (i64.shl (local.get $w) (i64.const 3))))
-    (local.set $km (i64.shl (i64.const 1) (i64.shl (local.get $k) (i64.const 3))))
-    (local.set $a (call $record_word (i32.sub (i32.wrap_i64 (local.get $ws)) (local.get $stride)) (i32.wrap_i64 (local.get $w))))
-    (local.set $p (if (result i64) (i32.gt_s (local.get $wd) (i32.const 0))
-      (then (i64.rem_u (i64.sub (i64.add (i64.shl (local.get $a) (i64.const 1)) (local.get $m))
-        (call $record_word (i32.sub (i32.wrap_i64 (local.get $ws)) (i32.shl (local.get $stride) (i32.const 1))) (i32.wrap_i64 (local.get $w)))) (local.get $m)))
-      (else (local.get $a))))
-    (local.set $dd (i64.rem_u (i64.sub (i64.add (call $record_word (i32.wrap_i64 (local.get $ws)) (i32.wrap_i64 (local.get $k))) (local.get $km))
-      (i64.rem_u (local.get $p) (local.get $km))) (local.get $km)))
-    (if (i32.and (i64.ne (local.get $k) (i64.const 0)) (i64.ge_u (local.get $dd) (i64.shr_u (local.get $km) (i64.const 1))))
-      (then (local.set $dd (i64.add (local.get $dd) (i64.sub (local.get $m) (local.get $km))))))
-    (i32.store offset=48 (local.get $r) (i32.xor (i32.and (i32.wrap_i64 (i64.shr_u (i64.rem_u (i64.add (local.get $p) (local.get $dd)) (local.get $m)) (i64.shl (local.get $k) (i64.const 3)))) (i32.const 255)) (i32.const 255)))
-    (local.set $h (call $record_mix (local.get $h) (i32.wrap_i64 (local.get $k))))))
+    ;; m - 1 and km - 1, with m = 2^(8 w) and km = 2^(8 k)
+    (local.set $mw (i32.shr_u (i32.const -1) (i32.sub (i32.const 32) (i32.shl (local.get $w) (i32.const 3)))))
+    (local.set $mk (i32.sub (i32.shl (i32.const 1) (local.tee $n (i32.shl (local.get $k) (i32.const 3)))) (i32.const 1)))
+    (local.set $p (i32.and (i32.load offset={OUT} (i32.sub (local.get $ws) (local.get $stride))) (local.get $mw)))
+    (if (i32.gt_s (local.get $d) (i32.const 0)) (then
+      (local.set $p (i32.and (i32.sub (i32.shl (local.get $p) (i32.const 1))
+        (i32.load offset={OUT} (i32.sub (local.get $ws) (i32.shl (local.get $stride) (i32.const 1))))) (local.get $mw)))))
+    ;; d = (word(ws, k) - p) mod km, less km from half of it on
+    (local.set $d (i32.and (i32.sub (i32.load offset={OUT} (local.get $ws)) (local.get $p)) (local.get $mk)))
+    (if (i32.gt_u (local.get $d) (i32.shr_u (local.get $mk) (i32.const 1)))
+      (then (local.set $d (i32.sub (i32.sub (local.get $d) (local.get $mk)) (i32.const 1)))))
+    (i32.store offset=48 (local.get $r) (i32.xor (i32.and (i32.shr_u (i32.and (i32.add (local.get $p) (local.get $d)) (local.get $mw)) (local.get $n)) (i32.const 255)) (i32.const 255)))
+    (local.set $h (call $record_mix (local.get $h) (local.get $k)))))
   (i32.store offset=4 (local.get $r) (i32.const 1))
   (i32.store (local.get $r) (call $record_mix (local.get $h) (i32.shr_u (local.get $h) (i32.const 15)))))
 (func $record_mix (param $h i32) (param $v i32) (result i32)
   (i32.rotl (i32.mul (i32.xor (local.get $h) (local.get $v)) (i32.const 0x9E3779B1)) (i32.const 13)))
-;; The little endian word of w bytes at `at`
-(func $record_word (param $at i32) (param $w i32) (result i64) (local $v i64)
-  (block $done (loop $byte
-    (br_if $done (i32.eqz (local.get $w)))
-    (local.set $v (i64.or (i64.shl (local.get $v) (i64.const 8)) (i64.load8_u offset={OUT} (i32.add (local.get $at) (local.tee $w (i32.sub (local.get $w) (i32.const 1)))))))
-    (br $byte)))
-  (local.get $v))
 "#;
 
 /// Character classes of the bytes, see `char_class_table`
@@ -1972,16 +1952,22 @@ const JS_NEXT_TOKEN_MAP: &str = r#"
 /// the counter, 36 expected bit, 40 state, 44 address of the inputs, 48 head, 52 chain, 56 probs,
 /// 60 counts, and the address of the state for the mixer at 0 of the next... see $mm_new
 const MATCH: &str = r#"
-(global $mm_mi (mut i32) (i32.const 0))
-(func $mm_new (param $r i32) (param $min i32) (param $cand i32) (param $flags i32) (param $head i32) (param $chain i32) (param $probs i32) (param $counts i32)
+(global $mr (mut i32) (i32.const {MM0}))
+(global $tp (mut i32) (i32.const {MM_REGION}))
+(func $tables (param $size i32) (result i32) (local $at i32)
+  (local.set $at (global.get $tp))
+  (global.set $tp (i32.add (local.get $at) (local.get $size)))
+  (local.get $at))
+(func $mm_new (param $min i32) (param $cand i32) (param $flags i32) (local $r i32) (local $probs i32)
+  (global.set $mr (i32.add (local.tee $r (global.get $mr)) (i32.const 64)))
   (i32.store (local.get $r) (local.get $min))
   (i32.store offset=4 (local.get $r) (local.get $cand))
   (i32.store offset=8 (local.get $r) (local.get $flags))
   (i32.store offset=44 (local.get $r) (global.get $ip))
-  (i32.store offset=48 (local.get $r) (local.get $head))
-  (i32.store offset=52 (local.get $r) (local.get $chain))
-  (i32.store offset=56 (local.get $r) (local.get $probs))
-  (i32.store offset=60 (local.get $r) (local.get $counts))
+  (i32.store offset=48 (local.get $r) (call $tables (i32.const 0x1000000)))
+  (i32.store offset=52 (local.get $r) (call $tables (i32.const {MM_CHAIN})))
+  (i32.store offset=56 (local.get $r) (local.tee $probs (call $tables (i32.const 0x1200000))))
+  (i32.store offset=60 (local.get $r) (call $tables (i32.const 0x480000)))
   (i32.store offset=32 (local.get $r) (global.get $mi))
   (i32.store (local.get $probs) (i32.const 0x7fffff))
   (call $rep (local.get $probs) (i32.const 4) (i32.const 0x1200000))

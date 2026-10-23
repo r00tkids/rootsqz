@@ -1,5 +1,5 @@
 // Decodes like coder_sliced.js, in slices of about 12 ms, with the WebAssembly decoder
-let decompressSliced = (a, done) => wasmDecoder(a, e => {
+let decompressSliced = (a, done) => wasmDecoder(WASM_MODULE, a, e => {
     let channel = new MessageChannel(), i;
     channel.port1.onmessage = () => {
         let sliceEnd = performance.now() + 12;

@@ -9,7 +9,7 @@
 let w = new Worker(URL.createObjectURL(new Blob(["(" + (() => {
 {{{decompressor_source}}}
 {{#if wasm}}
-onmessage = e => decompressWorker(e.data);
+onmessage = e => decompressWorker(...e.data);
 {{else}}
 onmessage = e => decompressWorker(model, e.data, {{{encoded_len}}}, {{{decoded_len}}});
 {{/if}}
@@ -39,7 +39,12 @@ p.slice(o).arrayBuffer().then(b => {
 {{#if worker}}
     // The worker posts the number of decoded bytes, and then the decoded bytes
     w.onmessage = e => e.data.at ? run(e.data) : rsqz.progress?.(e.data, {{{decoded_len}}});
+{{#if wasm}}
+    // The decoder with the stream
+    w.postMessage([{{{wasm_module}}}, a]);
+{{else}}
     w.postMessage(a);
+{{/if}}
 {{else}}
     // Decode after the loader has been painted: a requestAnimationFrame callback runs before the paint, the timeout after it
     requestAnimationFrame(() => setTimeout(() =>
@@ -62,7 +67,12 @@ document.body.innerHTML = "";
 p.slice(o).arrayBuffer().then(b => {
     a = new Uint8Array(b);
 {{#if worker}}
+{{#if wasm}}
+    // The decoder with the stream
+    w.postMessage([{{{wasm_module}}}, a]);
+{{else}}
     w.postMessage(a);
+{{/if}}
     // The worker posts the number of decoded bytes, and then the decoded bytes
     return new Promise(r => w.onmessage = e => e.data.at && r(e.data));
 }).then(d => {

@@ -622,7 +622,15 @@ pub fn render_output(
                 options,
             )?;
             info!("WebAssembly decoder: {} bytes", module.bytes.len());
-            (wasm_glue(&module, encoded_data.len(), size_before_compression, decoder), Some(module.bytes))
+            // The web output has the module before the boot code, as M; the node output as a string
+            let module_expr = match target {
+                Target::Web => format!("M.slice(0,{})", module.bytes.len()),
+                Target::Node => WASM_STRING.to_owned(),
+            };
+            (
+                wasm_glue(&module, encoded_data.len(), size_before_compression, decoder, &module_expr),
+                Some(module.bytes),
+            )
         }
         None => {
             let mut features_used = ModelRef::None;
@@ -717,7 +725,10 @@ pub fn render_output(
                 wasm_bytes.as_deref(),
             )?;
 
-            let html_header_str = html_header(deflated_code.len())?;
+            let html_header_str = match &wasm_bytes {
+                Some(bytes) => html_header_wasm(deflated_code.len(), bytes.len())?,
+                None => html_header(deflated_code.len())?,
+            };
             let html_header_bytes = html_header_str.as_bytes();
 
             info!(
@@ -767,9 +778,9 @@ pub fn render_output(
                     deflated_code.len(),
                     match &wasm_bytes {
                         Some(bytes) => format!(
-                            "decompressor JavaScript, {} bytes minified, with the WebAssembly decoder of {} bytes, deflated",
-                            decompressor_code_ugly.len() - js_string_literal(bytes).len(),
-                            bytes.len()
+                            "WebAssembly decoder of {} bytes and decompressor JavaScript of {} bytes minified, deflated",
+                            bytes.len(),
+                            decompressor_code_ugly.len()
                         ),
                         None => format!(
                             "decompressor JavaScript, {} bytes minified, deflated",
@@ -895,25 +906,24 @@ fn boot_code(
                 "worker": decoder == Decoder::Worker,
                 "boot_js": boot_js,
                 "wasm": wasm.is_some(),
+                "wasm_module": wasm.map(|bytes| format!("M.slice(0,{})", bytes.len())),
             }),
         )
         .context("Failed to render decompression code template")?;
 
     // The loader and boot scripts are part of the boot code, so a syntax error in them fails here
-    let mut decompressor_code_ugly = uglify_src(&decompressor_code)
+    let decompressor_code_ugly = uglify_src(&decompressor_code)
         .context("Failed to minify the boot code, including the loader and boot scripts")?;
-    if let Some(bytes) = wasm {
-        // After minifying, which would escape the bytes
-        decompressor_code_ugly = insert_wasm(&decompressor_code_ugly, bytes)?;
-    }
 
     info!(
         "Decompression code size before deflate: {}",
         decompressor_code_ugly.len()
     );
 
-    let deflated_code =
-        deflate_text(&decompressor_code_ugly).context("Failed to deflate decompression code")?;
+    // The WebAssembly decoder goes before the boot code, as bytes
+    let mut bytes = wasm.unwrap_or_default().to_vec();
+    bytes.extend_from_slice(decompressor_code_ugly.as_bytes());
+    let deflated_code = deflate(&bytes).context("Failed to deflate decompression code")?;
 
     info!(
         "Decompression code size after deflate: {}",
@@ -973,8 +983,19 @@ pub fn web_overhead(
 }
 
 /// The JavaScript that runs the WebAssembly decoder: `wasm_decoder.js` and the function that the
-/// boot code calls, with the lengths and addresses as numbers
-pub(crate) fn wasm_glue(module: &wasm_decoder::WasmDecoder, encoded_len: usize, decoded_len: usize, decoder: Decoder) -> String {
+/// boot code calls, with the lengths and addresses as numbers and `module_expr` for the bytes of
+/// the module
+/// The expression of the glue for the bytes of the module of the node output, which `insert_wasm`
+/// puts in
+pub(crate) const WASM_STRING: &str = "Uint8Array.from(\"@@WASM@@\", c => c.charCodeAt())";
+
+pub(crate) fn wasm_glue(
+    module: &wasm_decoder::WasmDecoder,
+    encoded_len: usize,
+    decoded_len: usize,
+    decoder: Decoder,
+    module_expr: &str,
+) -> String {
     let code = include_str!("js_source/wasm_decoder.js").to_owned()
         + match decoder {
             Decoder::Serial => include_str!("js_source/wasm_decompress.js"),
@@ -985,6 +1006,7 @@ pub(crate) fn wasm_glue(module: &wasm_decoder::WasmDecoder, encoded_len: usize, 
         .replace("WASM_DECODED_LEN", &decoded_len.to_string())
         .replace("WASM_INPUT", &module.input.to_string())
         .replace("WASM_OUTPUT", &module.output.to_string())
+        .replace("WASM_MODULE", module_expr)
 }
 
 /// `code` with the string "@@WASM@@" of the glue replaced by the bytes of the module
@@ -1026,20 +1048,40 @@ fn html_header(deflated_len: usize) -> Result<String> {
         .context("Failed to render html header template")
 }
 
+/// The HTML that inflates and runs the boot code of the WebAssembly decoder: the deflated bytes,
+/// `deflated_len` of them, are the module of `wasm_len` bytes and then the boot code, which it runs
+/// with the module bytes as M
+fn html_header_wasm(deflated_len: usize, wasm_len: usize) -> Result<String> {
+    let render = |start: usize| {
+        Handlebars::new().render_template(
+            include_str!("templates/web/index_wasm.html"),
+            &json!({
+                "decompressor_start": start,
+                "decompressor_end": start + deflated_len,
+                "wasm_len": wasm_len,
+            }),
+        )
+    };
+    // Its length depends on the numbers in it
+    let mut header = render(0)?;
+    loop {
+        let next = render(header.len())?;
+        if next.len() == header.len() {
+            return Ok(next);
+        }
+        header = next;
+    }
+}
+
 /// Raw deflate with zopfli, which finds a smaller encoding than zlib at its best level
-fn deflate_text(text: &str) -> Result<Vec<u8>> {
+fn deflate(data: &[u8]) -> Result<Vec<u8>> {
     let mut encoded_data = Vec::new();
     let options = zopfli::Options {
         // The boot code is a few KiB, so many iterations take well under a second
         iteration_count: std::num::NonZeroU64::new(1000).unwrap(),
         ..Default::default()
     };
-    zopfli::compress(
-        options,
-        zopfli::Format::Deflate,
-        text.as_bytes(),
-        &mut encoded_data,
-    )?;
+    zopfli::compress(options, zopfli::Format::Deflate, data, &mut encoded_data)?;
     Ok(encoded_data)
 }
 
