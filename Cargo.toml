@@ -20,6 +20,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version="0.3.22", features = ["fmt", "env-filter"] }
 # simd decodes the SIMD and relaxed SIMD instructions; the other proposals decode without a feature
 wasmparser = { version = "0.262.0", default-features = false, features = ["std", "simd"] }
+wat = "1.262.0"
 zopfli = { version = "0.8", default-features = false, features = ["std"] }
 
 [dev-dependencies]

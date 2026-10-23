@@ -270,6 +270,8 @@ mod node_tests {
             ("64k_records", size_64k, &records_input, records_layout.clone()),
             ("context_mixer_records", context_mixer, &records_input, records_layout),
         ] {
+            // The WebAssembly decoder too
+            crate::web::wasm_decoder::tests::check_predictions(name, &config, input, &layout, false);
             let mut model = config.create_model_for(&layout).unwrap();
             let mut expected = Vec::new();
             for byte in input {
