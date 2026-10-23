@@ -6,6 +6,8 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-23
+
 ### Added
 - `--wasm-decoder` (`wasmDecoder` in the Node API and the plugin) decodes with a WebAssembly decoder instead of the JavaScript one, with any `--decoder`, for the `web` and `node` targets. It is generated from the config like the JavaScript decoder, decodes the same stream 5–6 times as fast, and takes about 1 KB more. On a 64k intro of 225 KB in Chrome, with `--decoder worker`, decoder included:
   - `64k`: 55,162 → 56,233 bytes (+1,071), 16.6 s → 2.8 s
@@ -193,6 +195,7 @@ Not published: the release workflow failed before it published to npm.
 
 First release.
 
+[0.16.0]: https://github.com/r00tkids/rootsqz/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/r00tkids/rootsqz/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/r00tkids/rootsqz/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/r00tkids/rootsqz/compare/v0.12.0...v0.13.0
