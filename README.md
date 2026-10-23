@@ -124,8 +124,8 @@ How it works: by default, the decoder blocks the main thread, and the browser pa
 
 | Preset | Size, JavaScript decoder | Size, WebAssembly decoder | Decoding, JavaScript | Decoding, WebAssembly |
 |---|---|---|---|---|
-| `64k` | 55,162 bytes | 56,373 bytes (+1,211) | 16.6 s | 2.9 s |
-| `64k-fast` | 57,373 bytes | 58,149 bytes (+776) | 8.4 s | 1.5 s |
+| `64k` | 55,162 bytes | 56,235 bytes (+1,073) | 16.6 s | 2.8 s |
+| `64k-fast` | 57,373 bytes | 58,015 bytes (+642) | 8.4 s | 1.4 s |
 
 So `64k` with the WebAssembly decoder packs smaller than `64k-fast` with the JavaScript one and decodes about three times as fast. The decoder uses 128-bit SIMD, which all current browsers support. It works with the `web` and `node` targets, not with `--brotli`, and needs about as much memory as the JavaScript decoder.
 
