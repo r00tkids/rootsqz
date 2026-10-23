@@ -205,6 +205,80 @@ fn strip_custom_sections(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// The end of the s-expression that starts at `start`, past comments and strings
+fn sexpr_end(text: &str, start: usize) -> usize {
+    let bytes = text.as_bytes();
+    let (mut depth, mut i) = (0, start);
+    while i < bytes.len() {
+        match bytes[i] {
+            b';' if bytes.get(i + 1) == Some(&b';') => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            b'"' => {
+                i += 1;
+                while bytes[i] != b'"' {
+                    i += 1 + (bytes[i] == b'\\') as usize;
+                }
+            }
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// The places of `$name` in `text`, as a whole name
+fn name_uses<'a>(text: &'a str, name: &'a str) -> impl Iterator<Item = usize> + 'a {
+    text.match_indices(name)
+        .map(|(i, _)| i)
+        .filter(move |&i| !text[i + name.len()..].starts_with(is_name_char))
+}
+
+/// The module without the functions that nothing calls, exports or puts in the table, which the
+/// templates have for some configs only
+fn remove_unused_functions(mut text: String) -> String {
+    loop {
+        let mut removed = false;
+        let mut at = 0;
+        while let Some(start) = text[at..].find("(func $").map(|i| i + at) {
+            let name_end = text[start + 6..].find(|c: char| !is_name_char(c) && c != '$').map_or(text.len(), |i| i + start + 6);
+            let name = text[start + 6..name_end].to_owned();
+            let end = sexpr_end(&text, start);
+            let rest = format!("{}{}", &text[..start], &text[end..]);
+            let used = name_uses(&rest, &name).any(|i| {
+                let before = rest[..i].trim_end();
+                let line = &rest[rest[..i].rfind('\n').map_or(0, |n| n + 1)..];
+                ["call", "func", "start", "ref.func"].iter().any(|word| before.ends_with(word))
+                    || line.starts_with("(elem")
+            });
+            if used {
+                at = end;
+            } else {
+                text = rest;
+                at = start;
+                removed = true;
+            }
+        }
+        if !removed {
+            return text;
+        }
+    }
+}
+
 pub(crate) struct ModuleText {
     pub text: String,
     input: u32,
@@ -924,7 +998,7 @@ impl<'a> Gen<'a> {
             input4 = input + 4,
         );
         Ok(ModuleText {
-            text: module,
+            text: remove_unused_functions(module),
             input,
             output,
         })
