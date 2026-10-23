@@ -8,6 +8,7 @@ use anyhow::{bail, Context, Result};
 pub mod base64;
 pub mod output_generator;
 pub mod wasm_decoder;
+mod wasm_locals;
 
 use crate::{
     compressor::{

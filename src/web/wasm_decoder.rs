@@ -154,7 +154,7 @@ pub fn generate(
         anyhow::anyhow!("Failed to assemble the WebAssembly decoder: {e}\n{}", numbered(&text.text, &e))
     })?;
     Ok(WasmDecoder {
-        bytes: strip_custom_sections(&bytes)?,
+        bytes: super::wasm_locals::finish(&bytes, false)?,
         input: text.input,
         output: text.output,
     })
@@ -176,33 +176,6 @@ fn numbered(text: &str, error: &wat::Error) -> String {
         .take(10)
         .map(|(i, l)| format!("{:5} {l}\n", i + 1))
         .collect()
-}
-
-/// The module without its custom sections (the names that `wat` writes)
-fn strip_custom_sections(bytes: &[u8]) -> Result<Vec<u8>> {
-    let mut out = bytes[..8].to_vec();
-    for payload in wasmparser::Parser::new(0).parse_all(bytes) {
-        let payload = payload?;
-        if let wasmparser::Payload::CustomSection(_) = payload {
-            continue;
-        }
-        if let Some((id, range)) = payload.as_section() {
-            // The section header: its id and the length of its contents
-            out.push(id);
-            let range = range.start as usize..range.end as usize;
-            let mut len = range.len() as u32;
-            loop {
-                let byte = (len & 127) as u8;
-                len >>= 7;
-                out.push(byte | if len > 0 { 128 } else { 0 });
-                if len == 0 {
-                    break;
-                }
-            }
-            out.extend_from_slice(&bytes[range]);
-        }
-    }
-    Ok(out)
 }
 
 /// The end of the s-expression that starts at `start`, past comments and strings
