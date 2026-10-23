@@ -6,6 +6,12 @@ Changes that are not released yet are listed under Unreleased. On a release, tha
 
 ## [Unreleased]
 
+### Added
+- `--hide-data` (`hideData` in the Node API and the plugin) keeps the browser from showing the packed bytes of the web output as text, and from parsing them as HTML, while the page loads. It adds 10 bytes.
+
+### Changed
+- With the 64k size profiles, `--hide-data` is on by default, so their web output is 10 bytes larger. Turn it off with `--hide-data=false` (`hideData: false`). Outputs with `--size-profile 4k` or `--brotli` are unchanged.
+
 ## [0.16.0] - 2026-10-23
 
 ### Added

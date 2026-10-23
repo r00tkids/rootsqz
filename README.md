@@ -55,6 +55,7 @@ The main options:
 - `--loader` and `--decoder`: show something while the intro unpacks. See [Loader](#loader) and [Decoder](#decoder).
 - `--wasm-decoder`: decode with WebAssembly, 5–6 times as fast, for about 1 KB more. See [WebAssembly decoder](#webassembly-decoder).
 - `--title <TEXT>` and `--boot-js <FILE>`: set the page title, or run a script before the intro unpacks. See [Title and boot script](#title-and-boot-script).
+- `--hide-data[=<true|false>]`: hide the packed bytes while the page loads. See [Hidden data](#hidden-data).
 - `-r, --report`: write a report of where the bytes go. See [Compression report](#compression-report).
 - `--brotli`: use Brotli, which the browser unpacks itself. Smaller decoder, worse compression, and only Firefox 147+ and Safari 18.4+ support it (not Chrome, as of September 2026).
 
@@ -134,6 +135,9 @@ So `64k` with the WebAssembly decoder packs smaller than `64k-fast` with the Jav
 - `--boot-js <FILE>`: JavaScript that runs first, before the loader and decompression, e.g. to set up the page. It is minified with the boot code, so it costs about its minified and deflated size. It runs in its own function: its variables stay local, and it cannot see the demo's `rsqz` yet; use `--loader-js` for progress.
 
 Both are for the `web` target, also with `--brotli`.
+
+## Hidden data
+The packed bytes follow the HTML that unpacks them, so while the page loads, the browser shows them as text, and parses them into elements, until the boot code clears the page. `--hide-data` puts them in a `<noembed>` element, whose content the browser neither shows nor parses (`<plaintext hidden>` in the rare case that the bytes contain `</noembed`). It adds 10 bytes, and is on by default with the 64k size profiles; `--hide-data=false` turns it off. With `--size-profile 4k` and `--brotli`, it is off by default. It is for the `web` target.
 
 ## Vite / Rollup plugin
 [`@r00tkids/rollup-plugin-rootsqz`](packages/rollup-plugin-rootsqz) runs rootsqz on the bundle, so a Vite or Rollup project builds straight to one compressed HTML file.

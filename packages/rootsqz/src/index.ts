@@ -274,6 +274,13 @@ export type CompressOptions = RunOptions & {
   wasmDecoder?: boolean;
 
   /**
+   * Keep the browser from showing the packed bytes of the web output as text, and from parsing
+   * them as HTML, while the page loads (`--hide-data`). Adds 10 bytes. By default on with the 64k
+   * size profiles, and off with `4k` and `brotli`.
+   */
+  hideData?: boolean;
+
+  /**
    * Title of the web page (`--title`), set before the web output decompresses.
    */
   title?: string;
@@ -371,6 +378,9 @@ export function compressArgs(options: CompressOptions): string[] {
   }
   if (options.wasmDecoder) {
     args.push("--wasm-decoder");
+  }
+  if (options.hideData !== undefined) {
+    args.push(`--hide-data=${options.hideData}`);
   }
   if (options.title !== undefined) {
     args.push("--title", options.title);

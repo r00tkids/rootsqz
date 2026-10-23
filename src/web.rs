@@ -130,6 +130,12 @@ pub struct Args {
     #[arg(long)]
     pub wasm_decoder: bool,
 
+    /// Keep the browser from showing the packed bytes of the web output as text, and from parsing
+    /// them as HTML, while the page loads. Adds 10 bytes. By default on with the 64k size profiles,
+    /// off with 4k and --brotli
+    #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
+    pub hide_data: Option<bool>,
+
     /// Title of the web page, set before the web output decompresses
     #[arg(long, value_name = "TEXT")]
     pub title: Option<String>,
@@ -180,6 +186,16 @@ impl Args {
             None if loader.is_some_and(|loader| loader.js.is_some()) => Ok(Decoder::Sliced),
             None => Ok(Decoder::Serial),
         }
+    }
+
+    /// Whether the web output hides its packed bytes: --hide-data, or by default with a 64k profile.
+    fn hide_data(&self) -> Result<bool> {
+        if self.hide_data == Some(true) && self.target != output_generator::Target::Web {
+            bail!("--hide-data is only supported for the web target");
+        }
+        let profile = self.size_profile.unwrap_or(SizeProfile::SixtyFourK);
+        Ok(self.target == output_generator::Target::Web
+            && self.hide_data.unwrap_or(!self.brotli && profile != SizeProfile::FourK))
     }
 
     /// The script that runs first in the web output: --title, then --boot-js.
@@ -427,6 +443,7 @@ pub fn read_demo(js_main: &str, files: &[String]) -> Result<Demo> {
             // A guess, made better by `estimate_encoded_len`
             encoded_len: stream.len() / 6,
             files: layout_files,
+            hide_data: false,
             wasm: None,
         },
         stream,
@@ -502,6 +519,7 @@ fn choose_record_ranges(
 fn search_config(args: &Args, start: CompressConfig, start_json: &str) -> Result<CompressConfig> {
     let mut demo = read_demo(&args.js_main, &args.files)?;
     demo.layout.wasm = args.wasm_decoder.then(WasmOptions::default);
+    demo.layout.hide_data = args.hide_data()?;
     demo.layout.stream = choose_layout(&start, &demo)?;
     // FNV-1a over the parts and their lengths, which unlike std's hashers is the same in every
     // build of rootsqz
@@ -577,6 +595,7 @@ pub fn run(args: Args) -> Result<()> {
     let loader = args.loader()?;
     let decoder = args.decoder(loader.as_ref())?;
     let boot_js = args.boot_js()?;
+    let hide_data = args.hide_data()?;
     let main_js_bytes = std::fs::read(&args.js_main)
         .with_context(|| format!("Failed to read JS main file: {}", args.js_main))?;
     if args.brotli {
@@ -611,6 +630,7 @@ pub fn run(args: Args) -> Result<()> {
             &main_js_bytes,
             &files,
             boot_js.as_deref(),
+            hide_data,
         );
     }
 
@@ -678,6 +698,7 @@ pub fn run(args: Args) -> Result<()> {
     // for their decoder
     let mut demo = read_demo(&args.js_main, &args.files)?;
     demo.layout.wasm = args.wasm_decoder.then(WasmOptions::default);
+    demo.layout.hide_data = args.hide_data()?;
     let layout = choose_layout(&model_config, &demo)?;
     drop(demo);
     let packed_model = model_config.with_stream_models(&layout);
@@ -772,6 +793,7 @@ pub fn run(args: Args) -> Result<()> {
             loader,
             decoder,
             boot_js,
+            hide_data,
             base64: base64_runs.map(|runs| output_generator::Base64Runs {
                 marker: runs.marker,
                 lengths: runs.decoded.iter().map(Vec::len).collect(),
@@ -907,6 +929,7 @@ pub fn run_search(args: SearchArgs) -> Result<()> {
         let files: Vec<String> = files.split(',').map(str::to_owned).collect();
         let mut demo = read_demo(&files[0], &files[1..])?;
         demo.layout.wasm = args.wasm_decoder.then(WasmOptions::default);
+        demo.layout.hide_data = args.size_profile != SizeProfile::FourK;
         demo.layout.stream = choose_layout(&start, &demo)?;
         demo.layout.encoded_len = stream_size(&start, &demo)?;
         demos.push(demo);

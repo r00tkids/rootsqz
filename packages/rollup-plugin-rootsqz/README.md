@@ -133,6 +133,12 @@ rootsqz({
     wasmDecoder: false,
 
     /**
+     * Hide the packed bytes while the page loads, instead of the browser showing them as text.
+     * Adds 10 bytes. By default on with the 64k size profiles, off with 4k and brotli.
+     */
+    hideData: true,
+
+    /**
      * Title of the page, set before the output decompresses.
      */
     title: "My intro",

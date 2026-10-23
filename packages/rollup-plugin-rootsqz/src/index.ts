@@ -150,6 +150,13 @@ export type RootsqzOptions = {
   wasmDecoder?: boolean;
 
   /**
+   * Keep the browser from showing the packed bytes as text, and from parsing them as HTML,
+   * while the page loads (`--hide-data`). Adds 10 bytes. By default on with the 64k size
+   * profiles, and off with `4k` and `brotli`.
+   */
+  hideData?: boolean;
+
+  /**
    * Title of the page, set before the output decompresses (`--title`).
    */
   title?: string;
@@ -482,6 +489,7 @@ export default function (options: RootsqzOptions = {}): Plugin {
           loader: options.loader,
           decoder: options.decoder,
           wasmDecoder: options.wasmDecoder,
+          hideData: options.hideData,
           title: options.title,
           bootJs: options.bootJs,
           search: options.search,

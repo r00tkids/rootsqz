@@ -73,6 +73,11 @@ await compress({
      * Title of the web page, and a script that runs first, before the loader and decompression.
      */
     title: 'My intro',
+
+    /**
+     * Hide the packed bytes while the page loads. By default on with the 64k size profiles.
+     */
+    hideData: true,
     bootJs: 'boot.js',
 });
 ```

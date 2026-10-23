@@ -427,6 +427,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 loader: None,
                 decoder: Decoder::Serial,
                 boot_js: None,
+                hide_data: false,
                 layout: StreamLayout::default(),
                 base64: Some(output_generator::Base64Runs {
                     marker: runs.marker,
@@ -530,6 +531,8 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
             let config = serde_json::from_str(SIZE_64K_WASM_CONFIG_JSON).unwrap();
             let mut demo = crate::web::read_demo(js, &[wasm.to_owned()]).unwrap();
             demo.layout.wasm = wasm_decoder.then(Default::default);
+            // On by default with the 64k profiles
+            demo.layout.hide_data = true;
             demo.layout.stream = crate::web::choose_layout(&config, &demo).unwrap();
             demo.layout.encoded_len = crate::compressor::search::stream_size(&config, &demo).unwrap();
             assert_eq!(
@@ -571,6 +574,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 loader: None,
                 decoder: Decoder::Serial,
                 boot_js: None,
+                hide_data: false,
                 base64: None,
                 wasm: None,
             },
@@ -633,6 +637,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 loader: None,
                 decoder: Decoder::Serial,
                 boot_js: None,
+                hide_data: false,
                 base64: None,
                 wasm: None,
             },
@@ -684,6 +689,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                 loader: None,
                 decoder: Decoder::Serial,
                 boot_js: None,
+                hide_data: false,
                 base64: None,
                 wasm: None,
             },
@@ -699,7 +705,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
         .expect("Failed to render output");
     }
 
-    /// Renders the web output with every decoder, with and without a loader script and a boot script
+    /// Renders the web output with every decoder, with and without a loader script, a boot script and hidden data
     #[test]
     pub fn web_decoders() {
         let model_config = create_default_compress_config();
@@ -730,6 +736,7 @@ fs.writeFileSync(process.argv[3], new Uint8Array(preds.buffer));
                         loader,
                         decoder,
                         boot_js: with_loader.then(|| "document.title = 'x';".to_owned()),
+                        hide_data: with_loader,
                         base64: None,
                         wasm: None,
                     },
@@ -885,6 +892,7 @@ decompressSliced(model, new Uint8Array(fs.readFileSync(import.meta.dirname + "/i
                 loader: None,
                 decoder: Decoder::Serial,
                 boot_js: None,
+                hide_data: false,
                 base64: None,
                 wasm: None,
             },
@@ -961,6 +969,7 @@ mod wasm_decoder_tests {
                 loader: None,
                 decoder: Decoder::Serial,
                 boot_js: None,
+                hide_data: false,
                 base64: None,
                 wasm: Some(WasmOptions::default()),
             },
@@ -1053,6 +1062,7 @@ decompressSliced(input, output => {
                         loader,
                         decoder,
                         boot_js: None,
+                        hide_data: false,
                         base64: None,
                         wasm: Some(WasmOptions::default()),
                     },
